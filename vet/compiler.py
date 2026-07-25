@@ -79,7 +79,9 @@ The executor synthesizes the audio and owns the answer key by construction, so e
 stratum you name must map to a template and channel that exist.
 
 Rules:
-- 3 to 5 strata. Total probes across strata between 24 and 40.
+- 3 to 5 strata. Total probes across strata between 24 and 40. Fewer than ~24
+cannot separate this many vendors: the intervals stay overlapped and you end
+up buying on noise, which is worse than not testing.
 - Weights must sum to about 1.0 and should reflect business cost, not frequency. \
 A field the buyer acts on automatically (dialling a number back, sending a prescription) \
 is worth more than one a human reads.
