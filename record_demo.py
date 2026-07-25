@@ -15,9 +15,11 @@ What this does:
   3. Checks the run against the acceptance bar below; if it misses, says why and
      runs again (up to MAX_ATTEMPTS). Every attempt is a genuine run — nothing
      here edits a number the engine produced.
-  4. Time-compresses the recorded event clock so the replay lasts ~100 s: long
-     dead gaps (LLM latency, TTS batches) are capped, short bursts keep their
-     relative pacing, order and seq stay monotonic.
+  4. Time-compresses the recorded event clock so the replay lasts ~60 s, act by
+     act (15 / 30 / 15): long dead gaps (LLM latency, TTS batches) are capped,
+     short bursts keep their relative pacing, order and seq stay monotonic, and
+     the two beats an audience reacts to — just before the verdict, just before
+     the alarm — are deliberately held open.
   5. Copies every referenced probe .wav into vet/ui/clips/ and rewrites the
      audio_url fields, so the recording plays with no audio mount and no network.
 
@@ -396,14 +398,40 @@ def dir_mb(path: str) -> float:
                for f in os.listdir(path)) / 1e6 if os.path.isdir(path) else 0.0
 
 
+def _pinned_clips() -> set[str]:
+    """Clips the UI depends on that are not in this recording's event stream —
+    the story-mode hero probe lives here. Wiping it would silence slide 6."""
+    keep = set()
+    hero = os.path.join(UI, "hero_probe.json")
+    if os.path.exists(hero):
+        try:
+            with open(hero) as fh:
+                url = json.load(fh).get("audio_url", "")
+            if url:
+                keep.add(os.path.basename(url))
+        except Exception:
+            pass
+    return keep
+
+
 def stage_clips(events: list[dict]) -> dict:
     """Copy every referenced probe wav next to the UI and repoint the events."""
     probes = [e for e in events if e.get("type") == "probe"]
     with_results = {e["probe_id"] for e in events if e.get("type") == "result"}
 
+    pinned, saved = _pinned_clips(), {}
+    for name in pinned:                       # survive the wipe below
+        p = os.path.join(CLIPS, name)
+        if os.path.exists(p):
+            with open(p, "rb") as fh:
+                saved[name] = fh.read()
+
     if os.path.isdir(CLIPS):
         shutil.rmtree(CLIPS)
     os.makedirs(CLIPS, exist_ok=True)
+    for name, blob in saved.items():
+        with open(os.path.join(CLIPS, name), "wb") as fh:
+            fh.write(blob)
 
     referenced, missing, copied = {}, [], 0
     for p in probes:
@@ -432,7 +460,7 @@ def stage_clips(events: list[dict]) -> dict:
     if dir_mb(CLIPS) > SIZE_BUDGET_MB:
         print(f"    [clips] still {dir_mb(CLIPS):.1f} MB — keeping only probes with results")
         for f in sorted(os.listdir(CLIPS)):
-            if f[:-4] not in with_results:
+            if f[:-4] not in with_results and f not in pinned:
                 os.remove(os.path.join(CLIPS, f))
                 dropped.append(f[:-4])
 

@@ -1,5 +1,8 @@
 # Vet — the pre-flight check for agents that spend money
 
+### ▶ [**Watch the demo**](https://amitrege.github.io/vet-buyer-side-evals/) — 9 slides, ~2 min, plays in the browser with real audio
+
+
 **Public benchmarks are dyno tests. Vet does road tests.**
 
 An agent is about to commit to a vendor. Before it spends, Vet compiles a private,

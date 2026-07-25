@@ -1010,7 +1010,7 @@ function dispatch(ev) {
    loaded over fetch and played off the animation frame: no websocket, no server,
    nothing that can be down when the room is watching. */
 const replay = {
-  events: [], i: 0, playing: false, ended: false, vt: 0, anchor: 0, loaded: null,
+  events: [], i: 0, playing: false, ended: false, vt: 0, anchor: 0, loaded: null, stopAt: null,
   sources() {
     const rid = QS.get('replay');
     if (rid && !truthy(rid)) return [`runs/${encodeURIComponent(rid)}.jsonl`,   // SPEC: ?replay=<run_id>
@@ -1047,7 +1047,9 @@ const replay = {
     const now = performance.now();
     this.vt += (now - this.anchor) / 1000 * speed;
     this.anchor = now;
+    if (this.stopAt != null && this.vt > this.stopAt) this.vt = this.stopAt;
     while (this.i < this.events.length && this.events[this.i].t <= this.vt) dispatch(this.events[this.i++]);
+    if (this.stopAt != null && this.vt >= this.stopAt) { this.pause(); return; }
     if (this.i >= this.events.length && this.events.length) {
       this.playing = false; this.ended = true; clock.freeze();
       nodes.modeChip.classList.add('done');
@@ -1197,6 +1199,7 @@ function resumeDemo() {
 /* SPACE / ENTER — start it, then pause and resume it. `explicit` is a click on
    the button: only that may abandon a live run that is already in flight. */
 const toggleDemo = safe(explicit => {
+  if (story.on) { story.setAuto(!story.auto); return; }   // in story mode this is auto-play
   if (replay.ended) { location.href = location.pathname + '?demo=1'; return; }
   if (!replayMode && state.started) { if (explicit) location.href = location.pathname + '?demo=1'; return; }
   if (!state.started) { startDemo(); return; }
@@ -1264,18 +1267,342 @@ $$('#jumpSeg .seg-btn').forEach(b =>
 
 /* keyboard — everything the presenter needs without finding a button */
 const SPEEDS = [1, 2, 4];
+const stepOfDot = d => Math.max(0, STEPS.findIndex(s => s.dot === d));
 window.addEventListener('keydown', safe(e => {
   const tag = (e.target && e.target.tagName) || '';
   if (tag === 'TEXTAREA' || tag === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
+
+  if (story.on) {                                  // guided narrative
+    if (k === ' ' || k === 'Spacebar' || k === 'Enter' || k === 'ArrowRight' || k === 'PageDown') {
+      e.preventDefault(); story.setAuto(false); story.next();
+    } else if (k === 'ArrowLeft' || k === 'PageUp' || k === 'Backspace') {
+      e.preventDefault(); story.setAuto(false); story.prev();
+    } else if (k === 'p' || k === 'P') { e.preventDefault(); story.setAuto(!story.auto); }
+    else if (k === 'd' || k === 'D') { showStory(false); }
+    else if (k === '1') story.go(0);
+    else if (k === '2') story.go(STEPS.findIndex(s => s.dashboard));
+    else if (k === '3') story.go(stepOfDot(8));
+    else if (k === ']' || k === '+' || k === '=') setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)] || 4);
+    else if (k === '[' || k === '-') setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(speed) - 1)] || 1);
+    else if (k === 'r' || k === 'R') location.href = location.pathname + '?demo=1';
+    return;
+  }
+
   if (k === ' ' || k === 'Spacebar' || k === 'Enter') { e.preventDefault(); toggleDemo(false); }
   else if (k === '1' || k === '2' || k === '3') { e.preventDefault(); jumpToAct(+k); }
   else if (k === ']' || k === '+' || k === '=') { setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)] || 4); }
   else if (k === '[' || k === '-') { setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(speed) - 1)] || 1); }
-  else if (k === 'd' || k === 'D') { setDetails(!state.details); }
+  else if (k === 'x' || k === 'X') { setDetails(!state.details); }
+  else if (k === 'd' || k === 'D') { showStory(true); }
   else if (k === 'r' || k === 'R') { location.href = location.pathname + '?demo=1'; }
-  else if (k === 'l' || k === 'L') { location.href = location.pathname; }
+  else if (k === 'l' || k === 'L') { location.href = location.pathname + '?dash=1'; }
 }));
+
+/* ═══════════════════════════════════════════════════════════════════
+   STORY MODE — the default view.
+   One idea per slide, plain words, no jargon. The recording underneath is
+   the same one the dashboard plays; the slides just walk you through it and
+   hand the dashboard the two moments where it earns its place.
+   ═══════════════════════════════════════════════════════════════════ */
+const HERO = { probe: null };                 // vet/ui/hero_probe.json
+const rec = {
+  one(type, pred) { return replay.events.find(e => e.type === type && (!pred || pred(e))); },
+  all(type, pred) { return replay.events.filter(e => e.type === type && (!pred || pred(e))); },
+  tOf(type, pred) { const e = this.one(type, pred); return e ? e.t : null; },
+};
+
+const SL = {                                   // small builders, big type
+  head: (h, s) => `<h1 class="s-head">${h}</h1>${s ? `<p class="s-sub">${s}</p>` : ''}`,
+  cap:  t => `<p class="s-cap">${t}</p>`,
+};
+
+function heroSentence() {
+  const p = HERO.probe;
+  if (!p) return '';
+  let html = esc(p.text);
+  for (const e of (p.entities || [])) {
+    const spoken = e.spoken || e.value;
+    if (!spoken) continue;
+    const cls = e.kind === 'phone' ? 'mark-tel' : e.kind === 'drug' ? 'mark-drug' : 'mark-dose';
+    html = html.replace(esc(spoken), `<mark class="${cls}">${esc(spoken)}</mark>`);
+  }
+  return html;
+}
+
+const VENDOR_TAKES = [
+  ['OpenAI gpt-4o-transcribe',
+   `Good. My mother was Today, <b class="bad">Enalapril</b> 5 milligrams. <b class="bad">Heo Dogu
+    Kangachi. Hold your tree clippers. Faraday cage.</b> <b class="bad">1259</b>`,
+   'wrong drug — Enalapril is a <i>different</i> real blood-pressure drug — plus whole sentences nobody said'],
+  ['Deepgram Nova-3',
+   `Thanks. My mother was discharged today, and they retrieved <b class="bad">lipinephrine</b>
+    5 milligrams. Paramolelol tengoakee, colony a <b class="bad">3 4 6, 5 8 8</b>`,
+   'wrong drug, and the callback number stops halfway'],
+  ['Gladia Solaria',
+   `My mother was discharged today and they prescribed <b class="bad">lipinopril</b> 5 mg.
+    Paranobot Tango Aki. Call me at <b class="bad">346.</b>`,
+   'near-miss drug, and only 3 of the 10 digits'],
+  ['AssemblyAI Universal',
+   `My mother was discharged today and they'll <b class="bad">[no drug at all]</b> five milligrams.
+    Paranovo Tengo Aki called me a <b class="good">346 588-5259</b>.`,
+   'drops the drug entirely — but the callback number is <b class="good">exactly right</b>'],
+];
+
+function critCards() {
+  const strata = rec.all('stratum');
+  if (!strata.length) return '';
+  return `<div class="crit-list">` + strata.map((s, i) => `
+    <div class="crit" style="--i:${i}">
+      <div class="crit-top"><b>${esc(s.name)}</b><span>counts for ${Math.round((s.weight || 0) * 100)}% of the decision</span></div>
+      <p>${esc(s.rationale || '')}</p>
+      <div class="crit-bar"><span style="width:${Math.round((s.weight || 0) * 100)}%"></span></div>
+    </div>`).join('') + `</div>`;
+}
+
+function closeNumbers() {
+  const v = rec.one('verdict');
+  if (!v) return '';
+  // the winner's standing *as the verdict was signed* — Act 3 re-races some of
+  // these vendors, and its numbers are a different question.
+  const st = replay.events.slice(0, replay.events.indexOf(v)).reverse()
+    .find(e => e.type === 'standing' && e.vendor_id === v.winner);
+  return `
+    <div class="close-win"><span class="close-dot"></span><b id="closeName">${esc(v.winner_name || v.winner)}</b></div>
+    <div class="close-grid">
+      <div><b id="closeErr">${st ? fmt.pct1(st.mean) + '%' : '—'}</b><span>of the details wrong on this buyer's calls</span></div>
+      <div><b id="closeConf">${Math.round((v.p_best || 0) * 100)}%</b><span>confidence it is the best of the six</span></div>
+      <div><b id="closeCost">${fmt.cents(v.cost_usd || 0)}</b><span>total cost of the whole exam</span></div>
+    </div>`;
+}
+
+const STEPS = [
+  { dot: 0, hold: 5, label: 'the setup', html: () =>
+    SL.head('Soon your agent will do the buying.',
+            'It will pick the transcription service, the voice agent, the model — not you.') },
+
+  { dot: 1, hold: 5, label: 'the problem', html: () =>
+    SL.head('So agents will have to judge sellers.',
+            'Today the only tool they have is a public leaderboard.') },
+
+  { dot: 2, hold: 7, label: 'why that breaks', html: () =>
+    SL.head('Leaderboards can be gamed.') +
+    `<div class="stark"><b>8 of 8</b><span>major AI benchmarks scored near-perfect —<br>without solving a single task</span></div>` +
+    `<p class="s-sub">A public score is a target, and targets get optimised.</p>` },
+
+  { dot: 3, hold: 8, label: 'the buyer', html: () =>
+    SL.head('So we build a private exam, for one buyer, from scratch.') +
+    `<blockquote class="need-quote">“${esc(($('#needText').value || '').trim())}”</blockquote>` +
+    SL.cap('One real buyer. One real job. Nothing off a shelf.') },
+
+  { dot: 4, hold: 10, label: 'the criteria', enter: () => {
+      const last = rec.all('stratum').slice(-1)[0];
+      if (last) replay.seek(last.t + 0.05);
+    }, html: () =>
+    SL.head('First: what actually matters to this buyer?',
+            'An AI reads the request and decides what to test — and how much each thing counts.') +
+    critCards() },
+
+  { dot: 5, hold: 12, label: 'a real test', html: () =>
+    SL.head('Then it writes the actual tests.', 'Here is one, for the criterion above.') +
+    `<div class="probe-slide">
+       <p class="probe-sentence">${heroSentence()}</p>
+       <div class="probe-play">
+         <button id="storyPlay" class="story-play">▶<span>HEAR IT</span></button>
+         <audio id="storyAudio" preload="auto"${HERO.probe ? ` src="${esc(HERO.probe.audio_url)}"` : ''}></audio>
+         <p class="s-cap">Spoken by a Spanish-accented voice, over a noisy phone line —
+            the way this clinic's calls actually arrive.</p>
+       </div>
+     </div>` },
+
+  { dot: 6, hold: 10, label: 'the answer key', html: () =>
+    SL.head('How do we know the right answer?',
+            'Because we wrote the sentence first — then had it spoken out loud.') +
+    `<div class="flow">
+       <div class="flow-step"><label>1 · we write it</label><b>“Call me at 346-588-5259”</b></div>
+       <div class="flow-arrow">→</div>
+       <div class="flow-step"><label>2 · a voice speaks it</label><b>on a bad line, in a noisy room</b></div>
+       <div class="flow-arrow">→</div>
+       <div class="flow-step key"><label>3 · answer key</label><b>346-588-5259</b></div>
+     </div>` +
+    SL.cap('No human ever labels anything. The test and its answer are born together.') },
+
+  { dot: 7, hold: 14, label: 'who hears it', html: () =>
+    SL.head('Now we see who actually hears it.', 'Same audio, four real vendors.') +
+    `<div class="takes">` + VENDOR_TAKES.map(([n, t, note]) => `
+       <div class="take"><label>${esc(n)}</label><p>${t}</p><span class="take-note">${note}</span></div>`).join('') +
+    `</div>` +
+    SL.cap('One prescription. Four different ways to get it wrong — and only one of them gets the phone number right.') },
+
+  { dot: 7, hold: 26, label: 'the race', dashboard: true, enter: () => {
+      const tRace = rec.tOf('phase', e => e.phase === 'race');
+      const tVerdict = rec.tOf('verdict');
+      if (tRace != null && replay.vt < tRace) replay.seek(tRace);
+      replay.stopAt = tVerdict != null ? tVerdict + 1.0 : null;
+      replay.resume();
+    } },
+
+  { dot: 8, hold: 12, label: 'the cloak', enter: () => {
+      const t = rec.tOf('sting_signal', e => e.mode === 'naive');
+      if (t != null) replay.seek(t + 0.05);
+    }, html: () => {
+      const n = rec.one('sting_signal', e => e.mode === 'naive') || {};
+      const nr = rec.one('naive_result') || {};
+      return SL.head('One problem: sellers can tell when they’re being tested.',
+        'A vendor that spots a test can serve its best model for the exam and a cheaper one for real ' +
+        'customers. Cars did this with emissions.') +
+      `<div class="beat">
+         <p class="beat-line">Our first exam sounded like a lab recording. The vendor spotted it
+            <b>every single time</b> — and looked great.</p>
+         <div class="beat-stats">
+           <div><b>${esc(nr.premium_served || '38/38')}</b><span>tests it caught, and served its best model to</span></div>
+           <div><b>${Math.round((n.auc == null ? 1 : n.auc) * 100)}%</b><span>how easily it can spot our test</span></div>
+         </div>
+       </div>`;
+    } },
+
+  { dot: 8, hold: 14, label: 'the cloak drops', enter: () => {
+      replay.stopAt = null;
+      replay.seek(replay.events.length ? replay.events[replay.events.length - 1].t + 0.1 : 0);
+    }, html: () => {
+      const s = rec.one('sting_signal', e => e.mode === 'stealth') || {};
+      const a = rec.one('alarm') || {};
+      const ev = a.evidence || {};
+      return SL.head('So we made the tests sound exactly like its real calls.',
+        'Same background noise, same phone line, same mess. Now it can’t tell the difference.') +
+      `<div class="beat">
+         <div class="beat-stats big">
+           <div><b>100% <span class="arrow">→</span> ${Math.round((s.auc == null ? 0.5 : s.auc) * 100)}%</b>
+                <span>how easily it can spot our test — now a coin flip</span></div>
+           <div><b>${ev.naive_error != null ? Math.round(ev.naive_error * 100) : 7}%
+                <span class="arrow">→</span> ${ev.stealth_error != null ? Math.round(ev.stealth_error * 100) : 35}%</b>
+                <span>of the details it now gets wrong, on the same questions</span></div>
+         </div>
+         <div class="story-banner" id="storyBanner">DEFEAT&nbsp;DEVICE&nbsp;DETECTED</div>
+         <p class="s-cap">Caught, on the buyer's own traffic — not on a benchmark.</p>
+       </div>`;
+    } },
+
+  { dot: 9, hold: 16, label: 'the verdict', html: () =>
+    SL.head('The buyer gets an answer they can act on.') + closeNumbers() +
+    SL.cap('Private exam. Real vendors. A number the seller cannot see coming.') },
+];
+
+const story = {
+  on: true, i: -1, auto: false, acc: 0, built: false,
+  slides: [], dots: [],
+  build() {
+    if (this.built) return;
+    this.built = true;
+    const host = $('#slides'), dotHost = $('#storyDots');
+    host.innerHTML = ''; dotHost.innerHTML = '';
+    STEPS.forEach((s, i) => {
+      const n = el('section', 'slide');
+      n.dataset.step = i;
+      n.innerHTML = s.dashboard ? '' : (s.html ? s.html() : '');
+      host.appendChild(n);
+      this.slides.push(n);
+    });
+    const dotCount = Math.max(...STEPS.map(s => s.dot)) + 1;
+    for (let d = 0; d < dotCount; d++) {
+      const n = el('span', 'dot');
+      n.addEventListener('click', safe(() => this.go(STEPS.findIndex(s => s.dot === d))));
+      dotHost.appendChild(n);
+      this.dots.push(n);
+    }
+    if (!this.wired) {                          // click anywhere on the slide = next
+      this.wired = true;
+      host.addEventListener('click', safe(e => {
+        const t = e.target;
+        if (t && t.closest && t.closest('button, a, audio, input, .dot')) return;
+        this.setAuto(false); this.next();
+      }));
+    }
+    const audio = $('#storyAudio');
+    const btn = $('#storyPlay');
+    if (btn && audio) {
+      btn.addEventListener('click', safe(() => {
+        try {
+          if (audio.paused) { const p = audio.play(); if (p && p.catch) p.catch(() => {}); btn.classList.add('on'); }
+          else { audio.pause(); audio.currentTime = 0; btn.classList.remove('on'); }
+        } catch (e) { /* never throw on stage */ }
+      }));
+      audio.addEventListener('ended', safe(() => btn.classList.remove('on')));
+    }
+  },
+  go(i) {
+    this.build();
+    i = clamp(i, 0, STEPS.length - 1);
+    if (i === this.i) return;
+    const audio = $('#storyAudio');
+    if (audio) { try { audio.pause(); audio.currentTime = 0; } catch (e) {} }
+    const play = $('#storyPlay'); if (play) play.classList.remove('on');
+    this.i = i; this.acc = 0;
+    const step = STEPS[i];
+    this.slides.forEach((n, k) => n.classList.toggle('on', k === i));
+    this.dots.forEach((n, k) => {
+      n.classList.toggle('on', k === step.dot);
+      n.classList.toggle('done', k < step.dot);
+    });
+    document.body.classList.toggle('dashboard', !!step.dashboard);
+    nodes.phaseTitle.textContent = step.dashboard ? 'The race' : step.label;
+    nodes.phaseSub.textContent = `guided walkthrough · ${step.dot + 1} of ${this.dots.length}`;
+    if (!step.dashboard) replay.stopAt = null;
+    if (step.enter) { try { step.enter(); } catch (e) { console.warn('[vet] slide', i, e); } }
+  },
+  next() { if (this.i >= STEPS.length - 1) return; this.go(this.i + 1); },
+  prev() { this.go(Math.max(0, this.i - 1)); },
+  frame(dt) {
+    if (!this.on || !this.auto || this.i < 0) return;
+    const step = STEPS[this.i];
+    if (step.dashboard) {                       // the recording paces this one
+      if (replay.stopAt != null && replay.vt >= replay.stopAt) { replay.pause(); this.next(); }
+      return;
+    }
+    this.acc += dt * speed;
+    if (this.acc >= (step.hold || 6)) this.next();
+  },
+  setAuto(on) {
+    this.auto = !!on;
+    setDemoBtn(on ? '❚❚&nbsp;PAUSE' : '▶&nbsp;PLAY DEMO', on ? 'P' : 'SPACE');
+    $('#btnDemo').classList.toggle('playing', !!on);
+  },
+};
+
+/* Story ⇄ dashboard. The dashboard is one key away, never the first thing seen. */
+const showStory = safe(on => {
+  story.on = !!on;
+  document.body.classList.toggle('story', story.on);
+  $('#acts').classList.toggle('hidden', story.on);
+  $('#btnAct3').classList.toggle('hidden', story.on);
+  if (story.on) {
+    story.build();
+    if (story.i < 0) story.go(0);
+    document.body.classList.toggle('dashboard', !!STEPS[Math.max(0, story.i)].dashboard);
+  } else {
+    document.body.classList.add('dashboard');
+    story.setAuto(false);
+    nodes.phaseSub.textContent = 'full instrument — press D for the walkthrough';
+  }
+});
+
+const startStory = safe(async () => {
+  await startDemo();                            // arms the recording, drops the socket
+  replay.pause();                               // the slides drive it, not the wall clock
+  await loadHeroProbe();
+  story.built = false; story.slides = []; story.dots = [];
+  story.build();
+  story.go(0);
+  showStory(true);
+});
+
+async function loadHeroProbe() {
+  if (HERO.probe) return;
+  try {
+    const r = await fetch('hero_probe.json');
+    if (r.ok) HERO.probe = await r.json();
+  } catch (e) { /* the slide degrades to text-only */ }
+}
 
 /* ═══════════════ MASTER LOOP ═══════════════ */
 let _lastT = performance.now();
@@ -1288,6 +1615,7 @@ function loop(now) {
     tw.frame(dt);
     waveMain.frame(dt); waveNaive.frame(dt); waveStealth.frame(dt);
     gaugeNaive.frame(dt); gaugeStealth.frame(dt);
+    story.frame(dt);
   } catch (e) { console.warn('[vet] loop', e); }
   requestAnimationFrame(loop);
 }
@@ -1299,6 +1627,8 @@ window.addEventListener('unhandledrejection', e => { console.warn('[vet] promise
 (function boot() {
   setDetails(truthy(QS.get('details')));
   setSpeed(SPEEDS.includes(SPEED) ? SPEED : speed);
+  // ?dash=1 (or ?replay=…) opens the full instrument instead of the walkthrough.
+  const dashFirst = truthy(QS.get('dash')) || REPLAY || AUTO;
   if (replayMode) {
     setModeChip();
     $('#btnMode').classList.add('hidden');
@@ -1306,9 +1636,14 @@ window.addEventListener('unhandledrejection', e => { console.warn('[vet] promise
   } else {
     nodes.modeChip.textContent = 'LIVE';
     nodes.modeChip.classList.add('live');
-    connectWS();
+    if (dashFirst) connectWS();
     replay.load();          // warm the recording so ▶ PLAY DEMO is instant
   }
-  if (DEMO) startDemo();
-  else if (AUTO) startRun();
+  if (dashFirst) {
+    showStory(false);
+    if (DEMO) startDemo();
+    else if (AUTO) startRun();
+  } else {
+    startStory().then(safe(() => { if (DEMO) story.setAuto(true); }));
+  }
 })();
