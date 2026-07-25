@@ -119,17 +119,25 @@
       <div id="probeIdle" class="idle-note">— synthesizing probe battery —</div>
     </section>
 
-    <section class="card" id="boardCard">
+    <section class="card lean" id="boardCard">
       <div class="card-head">
         <h2>Vendor race</h2>
         <span class="card-meta">decision-relevant error · dot = mean · whiskers = 95% CI</span>
+        <button id="btnDetails" class="ghost-btn tiny" title="show WER / latency / spend / P(best) (key: D)">DETAILS</button>
       </div>
+
+      <!-- the one line the room should read -->
+      <div id="boardHero" class="board-hero hidden">
+        <span class="v-dot" id="heroDot"></span>
+        <p class="hero-text"><b id="heroName">—</b><span id="heroRest" class="hero-rest"></span></p>
+      </div>
+
       <div class="board-scroll">
         <div class="board-cols hidden" id="boardCols">
           <span></span><span></span>
           <span class="ci-axis" id="ciAxis"></span>
-          <span class="c-num">ERR</span><span class="c-num">WER</span><span class="c-num">LAT</span>
-          <span class="c-num">SPEND</span><span class="c-num">P(BEST)</span>
+          <span class="c-num c-err">ERR</span><span class="c-num c-wer">WER</span><span class="c-num c-lat">LAT</span>
+          <span class="c-num c-spend">SPEND</span><span class="c-num c-pb">P(BEST)</span>
         </div>
         <div id="boardRows"></div>
         <div id="boardIdle" class="idle-note">— vendors register at race start —</div>
@@ -249,6 +257,17 @@
     <div class="banner-sub">
       <span id="bannerDetail"></span>
       <span class="chip-row" id="bannerChips"></span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ STORY MODE — the default view ══════════ -->
+<section id="story">
+  <div id="slides"></div>
+  <div id="storyFoot">
+    <div id="storyDots"></div>
+    <div id="storyHint">
+      <kbd>space</kbd> or <kbd>→</kbd> next · <kbd>←</kbd> back · <kbd>P</kbd> auto-play · <kbd>D</kbd> dashboard
     </div>
   </div>
 </section>

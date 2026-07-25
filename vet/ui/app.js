@@ -63,7 +63,8 @@ const ROW_H  = 65;
 
 /* ── global state ───────────────────────────────────────────────── */
 const state = {
-  started: false, act3: false, phase: null, seeking: false,
+  started: false, demoStarted: false, act3: false, phase: null, seeking: false,
+  details: false,
   modeSel: 'live',                                   // live | sim toggle
   vendors: new Map(), vendorOrder: [],
   strata: new Map(), probes: new Map(),
@@ -174,13 +175,15 @@ class Waveform {
     this.gen++; this.stop();
     this.probe = p; this.buffer = null; this.peaks = null; this.progress = 0; this.dirty = true;
     if (this.btn) this.btn.disabled = true;
-    // Seeking blows through hundreds of probes; fetching every clip on the way
-    // past would stall the jump. Load the one we actually land on, next frame.
-    this.pending = this.gen;
+    // Seeking — and 4x playback — blow through hundreds of probes. Fetching a
+    // clip for each one on the way past would stall the jump, so a probe has to
+    // stay on screen long enough to be worth hearing before we load it.
+    this.pending = this.gen; this.pendingAt = performance.now();
     if (!state.seeking) this.flush();
   }
-  flush() {
+  flush(force) {
     if (!this.pending || !this.probe) return;
+    if (!force && performance.now() - this.pendingAt < 220) return;
     const gen = this.pending; this.pending = 0;
     this.load(this.probe, gen);
   }
@@ -484,15 +487,20 @@ const showProbe = safe(p => {
   waveMain.setProbe(p);
 });
 
+/* score.py aligns *tokens*: ["ok","mg","mg"], ["sub","cinco","cuatro"],
+   ["del","de",""], ["ins","","the"]. They carry no whitespace of their own, so
+   the strip has to put it back — and an insertion's word lives in seg[2], not
+   seg[1], or it renders as nothing at all. */
 function renderDiff(diff, result) {
+  const tok = (cls, s) => (s == null || s === '') ? '' : `<span class="${cls}">${esc(s)}</span> `;
   let refH = '', hypH = '';
   for (const seg of (diff || [])) {
     const op = seg[0];
-    if (op === 'ok') { refH += `<span class="t-ok">${esc(seg[1])}</span>`; hypH += `<span class="t-ok">${esc(seg[1])}</span>`; }
-    else if (op === 'sub') { refH += `<span class="t-ref">${esc(seg[1])}</span>`; hypH += `<span class="t-sub">${esc(seg[2])}</span>`; }
-    else if (op === 'del') { refH += `<span class="t-del">${esc(seg[1])}</span>`; }
-    else if (op === 'ins') { hypH += `<span class="t-ins">${esc(seg[1])}</span>`; }
-    else if (seg[1] != null) { refH += `<span class="t-ok">${esc(seg[1])}</span>`; hypH += `<span class="t-ok">${esc(seg[1])}</span>`; }
+    if (op === 'ok') { refH += tok('t-ok', seg[1]); hypH += tok('t-ok', seg[2] != null && seg[2] !== '' ? seg[2] : seg[1]); }
+    else if (op === 'sub') { refH += tok('t-ref', seg[1]); hypH += tok('t-sub', seg[2]); }
+    else if (op === 'del') { refH += tok('t-del', seg[1]); }
+    else if (op === 'ins') { hypH += tok('t-ins', seg[2] != null && seg[2] !== '' ? seg[2] : seg[1]); }
+    else if (seg[1] != null) { refH += tok('t-ok', seg[1]); hypH += tok('t-ok', seg[1]); }
   }
   pv.ref.innerHTML = refH;
   pv.hyp.innerHTML = result ? hypH : '<span class="t-ok" style="color:var(--muted)">waiting for vendor hypotheses…</span>';
@@ -562,8 +570,25 @@ function renderMarkdown(md) {
   return out.join('\n');
 }
 
+/* The one line the room reads: who won, how wrong it is on this buyer's calls,
+   how sure we are, what the answer cost. Everything else on this screen is the
+   working that backs it up. */
+const showHero = safe(ev => {
+  const v = state.vendors.get(ev.winner);
+  const s = state.standings.get(ev.winner);
+  $('#heroDot').style.background = v ? vendorColor(v) : 'var(--accent)';
+  $('#heroName').textContent = (v ? v.name : ev.winner_name) || ev.winner;
+  const bits = [];
+  if (s) bits.push(`<em>${fmt.pct1(s.mean)}%</em> error on your calls`);
+  bits.push(`<em>${Math.round(ev.p_best * 100)}%</em> confident`);
+  bits.push(`cost you <em>${fmt.cents(ev.cost_usd)}</em>`);
+  $('#heroRest').innerHTML = ' — ' + bits.join(' · ');
+  $('#boardHero').classList.remove('hidden');
+});
+
 const handleVerdict = safe(ev => {
   state.verdict = ev;
+  showHero(ev);
   const v = state.vendors.get(ev.winner);
   const card = $('#memoCard');
   card.classList.remove('hidden');
@@ -935,8 +960,11 @@ const handlers = {
   result: safe(ev => {
     if (!state.results.has(ev.probe_id)) state.results.set(ev.probe_id, new Map());
     state.results.get(ev.probe_id).set(ev.vendor_id, ev);
-    const p = state.probes.get(ev.probe_id);
-    if (p && p.stealth) { handleStingResult(ev); return; }
+    // Which act we are in decides where a result goes — NOT whether the probe
+    // carries a `stealth` block, because every probe does (Act 2's are stealth
+    // probes too). Routing on the field sent Act 2's results into Act 3's boards
+    // and left the race with no vendor tabs, no hypothesis diff and no WER.
+    if (state.act3) { handleStingResult(ev); return; }
     handleResultAgg(ev);
     onProbeResult(ev);
   }),
@@ -1046,7 +1074,7 @@ const replay = {
     for (const tk of tickers) tk.set(tk.t, true);
     gaugeNaive.v = gaugeNaive.t == null ? gaugeNaive.v : gaugeNaive.t;
     gaugeStealth.v = gaugeStealth.t == null ? gaugeStealth.v : gaugeStealth.t;
-    waveMain.flush(); waveNaive.flush(); waveStealth.flush();
+    waveMain.flush(true); waveNaive.flush(true); waveStealth.flush(true);
   },
   phaseTime(name) {
     const evn = this.events.find(e => e.type === 'phase' && e.phase === name);
@@ -1139,6 +1167,8 @@ const startRun = safe(async () => {
 
 /* the stage path: the recorded run, instantly, off the local file */
 const startDemo = safe(async () => {
+  if (state.demoStarted) return;        // two taps on the button must not double-play
+  state.demoStarted = true;
   replayMode = true;
   dropWS();
   clock.scale = speed;
@@ -1201,6 +1231,16 @@ const jumpToAct = safe(async n => {
   location.href = `${location.pathname}?demo=1&jump=${t.toFixed(2)}&speed=${speed}`;
 });
 
+/* ERR is the decision; WER / latency / spend / P(best) are the diligence behind
+   it. Default to the decision, one key away from the diligence. */
+const setDetails = safe(on => {
+  state.details = !!on;
+  $('#boardCard').classList.toggle('lean', !on);
+  $('#btnDetails').classList.toggle('on', !!on);
+  $('#btnDetails').textContent = on ? 'DETAILS ON' : 'DETAILS';
+});
+
+$('#btnDetails').addEventListener('click', () => setDetails(!state.details));
 $('#btnDemo').addEventListener('click', () => toggleDemo(true));
 $('#btnStart').addEventListener('click', startRun);
 $('#btnMode').addEventListener('click', safe(() => {
@@ -1232,6 +1272,7 @@ window.addEventListener('keydown', safe(e => {
   else if (k === '1' || k === '2' || k === '3') { e.preventDefault(); jumpToAct(+k); }
   else if (k === ']' || k === '+' || k === '=') { setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)] || 4); }
   else if (k === '[' || k === '-') { setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(speed) - 1)] || 1); }
+  else if (k === 'd' || k === 'D') { setDetails(!state.details); }
   else if (k === 'r' || k === 'R') { location.href = location.pathname + '?demo=1'; }
   else if (k === 'l' || k === 'L') { location.href = location.pathname; }
 }));
@@ -1256,6 +1297,7 @@ window.addEventListener('unhandledrejection', e => { console.warn('[vet] promise
 
 /* ═══════════════ BOOT ═══════════════ */
 (function boot() {
+  setDetails(truthy(QS.get('details')));
   setSpeed(SPEEDS.includes(SPEED) ? SPEED : speed);
   if (replayMode) {
     setModeChip();

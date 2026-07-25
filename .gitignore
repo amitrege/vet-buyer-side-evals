@@ -12,7 +12,8 @@ __pycache__/
 # Generated Vet artifacts
 vet/cache/
 vet/runs/
-vet/ui/clips/
+vet/ui/clips/*
+!vet/ui/clips/p14e0d7a4.wav   # hero clip used by the pitch deck
 vet/ui/*.jsonl
 
 # Downloaded research material and reference repositories

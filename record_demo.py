@@ -47,8 +47,11 @@ HOST, PORT = "127.0.0.1", 8787
 WS_URL = f"ws://{HOST}:{PORT}/ws"
 
 MAX_ATTEMPTS = 8
-TARGET_SECONDS = 100.0        # how long the replay should take end to end
-GAP_CAP = 0.6                 # no single inter-event gap longer than this (pre-rescale)
+TARGET_SECONDS = 60.0         # how long the replay should take end to end
+ACT_SHARE = (0.25, 0.50, 0.25)  # compile / race / sting -> 15 s, 30 s, 15 s
+GAP_CAP = 0.35                # no single inter-event gap longer than this (pre-rescale)
+MAX_GAP = 1.6                 # …and none longer than this after rescaling, ever
+HOLD = 1.2                    # held silence before the verdict and before the alarm
 SIZE_BUDGET_MB = 40.0
 
 # ---------------------------------------------------------------- acceptance
@@ -273,45 +276,90 @@ def print_metrics(m: dict, prefix: str = "  "):
 
 # ------------------------------------------------------------ time compression
 
-def compress_time(events: list[dict], target: float = TARGET_SECONDS,
-                  cap: float = GAP_CAP) -> tuple[list[dict], float, float]:
-    """Squeeze the wall clock into `target` seconds without reordering anything.
+def _fit_gaps(gaps: list[float], budget: float, cap: float = GAP_CAP,
+              max_gap: float = MAX_GAP) -> list[float]:
+    """Fit a run of gaps into `budget` seconds, squeezing the long ones hardest.
 
-    Long dead gaps get flattened to a cap; short gaps keep their shape. The cap
-    itself is searched so the total lands on target — which is exactly "compress
-    long gaps harder than short ones" with a knob that always terminates.
+    Capping is the whole trick: a cap only touches dead air, so bursts keep their
+    shape. The cap is bisected onto the budget when there is too much time, and
+    when there is too little (Act 1 is eight events and a long wait for the LLM)
+    we scale up instead — but never past `max_gap`, because a five-second hole is
+    a demo that looks broken, not a demo that is breathing.
     """
-    evs = sorted(events, key=lambda e: (e.get("t", 0.0), e.get("seq", 0)))
-    gaps = [0.0]
-    for a, b in zip(evs, evs[1:]):
-        gaps.append(max(0.0, b.get("t", 0.0) - a.get("t", 0.0)))
-    raw_total = sum(gaps)
+    if not gaps:
+        return []
 
     def total_at(c: float) -> float:
         return sum(min(g, c) for g in gaps)
 
     chosen = cap
-    if total_at(cap) > target:                     # dead time still dominates: cap harder
+    if total_at(cap) > budget:
         lo, hi = 0.0, cap
-        for _ in range(60):                        # bisect the cap onto the target
+        for _ in range(60):
             mid = (lo + hi) / 2
-            if total_at(mid) < target:
+            if total_at(mid) < budget:
                 lo = mid
             else:
                 hi = mid
         chosen = hi
-    scale = target / total_at(chosen) if total_at(chosen) > 0 else 1.0
-    scale = min(scale, 3.0)                        # never stretch a run beyond reason
+    base = total_at(chosen)
+    scale = budget / base if base > 0 else 1.0
+    if chosen > 0:
+        scale = min(scale, max_gap / chosen)
+    return [min(g, chosen) * scale for g in gaps]
+
+
+def _act_bounds(evs: list[dict]) -> list[tuple[int, int]]:
+    """[compile, race, sting) — the three acts, by the phase events themselves."""
+    def first(pred, default):
+        return next((i for i, e in enumerate(evs) if pred(e)), default)
+    i_race = first(lambda e: e["type"] == "phase" and e.get("phase") == "race", len(evs))
+    i_sting = first(lambda e: e["type"] == "phase" and e.get("phase") == "sting", len(evs))
+    i_sting = max(i_sting, i_race)
+    return [(0, i_race), (i_race, i_sting), (i_sting, len(evs))]
+
+
+def compress_time(events: list[dict], target: float = TARGET_SECONDS,
+                  cap: float = GAP_CAP) -> tuple[list[dict], float, list[float]]:
+    """Cut the run to `target` seconds, act by act, without reordering anything.
+
+    Each act gets its own time budget (25/50/25) so the race — the part with the
+    content — is not starved by Act 3's thousand-event tail. Whatever an act
+    cannot spend rolls forward instead of evaporating, so the cut still lands on
+    target. Two gaps are then *lengthened* on purpose: the beat before the
+    verdict and the beat before the alarm. Those are the two moments an audience
+    reacts to, and a held second is what gives them room to.
+    """
+    evs = sorted(events, key=lambda e: (e.get("t", 0.0), e.get("seq", 0)))
+    raw = [0.0] + [max(0.0, b.get("t", 0.0) - a.get("t", 0.0)) for a, b in zip(evs, evs[1:])]
+    raw_total = sum(raw)
+
+    beats = {i for i, e in enumerate(evs) if e["type"] in ("verdict", "alarm")}
+    new = [0.0] * len(evs)
+    carry = 0.0
+    spans = []
+    for (a, b), share in zip(_act_bounds(evs), ACT_SHARE):
+        idx = [i for i in range(a, b) if i > 0]
+        held = [i for i in idx if i in beats]
+        budget = target * share + carry - HOLD * len(held)
+        fitted = _fit_gaps([raw[i] for i in idx], max(0.4, budget), cap)
+        for i, g in zip(idx, fitted):
+            new[i] = g
+        for i in held:
+            new[i] += HOLD
+        spent = sum(fitted) + HOLD * len(held)
+        carry = max(0.0, target * share + carry - spent)
+        spans.append(round(spent, 1))
 
     t = 0.0
     for i, e in enumerate(evs):
-        t += min(gaps[i], chosen) * scale
+        t += new[i]
         e["t"] = round(t, 3)
         e["seq"] = i + 1
         # keep the numbers the UI prints in step with the clock it now runs on
         if e.get("type") in ("cost", "verdict") and "elapsed_s" in e:
             e["elapsed_s"] = round(t, 1)
-    return evs, raw_total, chosen * scale
+    return evs, raw_total, spans
 
 
 # ------------------------------------------------------------------- clips
@@ -454,9 +502,10 @@ def main() -> int:
             return 1
 
     print("\n[post] time-compressing…")
-    events, raw_span, max_gap = compress_time(events, target=args.target)
+    events, raw_span, spans = compress_time(events, target=args.target)
+    gaps = [round(b["t"] - a["t"], 3) for a, b in zip(events, events[1:])]
     print(f"  {raw_span:.1f}s of real time -> {events[-1]['t']:.1f}s of replay "
-          f"(largest gap now {max_gap:.2f}s)")
+          f"(acts {spans[0]}s / {spans[1]}s / {spans[2]}s, largest gap {max(gaps):.2f}s)")
 
     print("[post] staging audio…")
     clips = stage_clips(events)
