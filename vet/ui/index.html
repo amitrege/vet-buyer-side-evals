@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vet — the road test</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header id="hdr">
+  <div class="brand">
+    <span class="brand-mark">VET</span>
+    <span class="brand-sub">public benchmarks are dyno tests.<br>vet does road tests.</span>
+  </div>
+
+  <div class="hdr-phase">
+    <nav class="acts" id="acts">
+      <span class="act" data-act="compile"><i>01</i>COMPILE</span>
+      <span class="act" data-act="race"><i>02</i>RACE</span>
+      <span class="act" data-act="sting"><i>03</i>STING</span>
+    </nav>
+    <div class="phase-line">
+      <span id="phaseTitle">standing by</span>
+      <span id="phaseSub">type the need, then start the run</span>
+    </div>
+  </div>
+
+  <div class="hdr-right">
+    <div class="demo-ctl">
+      <button id="btnDemo" class="demo-btn" title="play the recorded run — no server, no waiting (SPACE)">
+        <span id="btnDemoLabel">▶&nbsp;PLAY DEMO</span><small id="btnDemoKey">SPACE</small>
+      </button>
+      <div class="demo-sub">
+        <span class="seg" id="speedSeg" title="playback speed">
+          <button class="seg-btn on" data-speed="1">1×</button>
+          <button class="seg-btn" data-speed="2">2×</button>
+          <button class="seg-btn" data-speed="4">4×</button>
+        </span>
+        <span class="seg" id="jumpSeg" title="jump to an act (keys 1 / 2 / 3)">
+          <button class="seg-btn" data-act="1">ACT&nbsp;1</button>
+          <button class="seg-btn" data-act="2">ACT&nbsp;2</button>
+          <button class="seg-btn" data-act="3">ACT&nbsp;3</button>
+        </span>
+      </div>
+    </div>
+    <span id="reconChip" class="chip chip-warn hidden"><span class="pulse-dot"></span>RECONNECTING</span>
+    <span id="modeChip" class="chip chip-mode">LIVE</span>
+    <span id="srcChip" class="chip hidden" title="how the vendor numbers in this run were produced"></span>
+    <button id="btnAct3" class="ghost-btn" disabled>CUE ACT 3</button>
+    <button id="btnReset" class="ghost-btn">RESET</button>
+    <div class="hdr-stat">
+      <label>ELAPSED</label>
+      <span id="elapsed" class="num">0:00</span>
+    </div>
+    <div class="hdr-stat hdr-cost">
+      <label>RUN SPEND</label>
+      <span id="costTicker" class="num">0.0¢</span>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <!-- ══════════ LEFT RAIL — exam compiler ══════════ -->
+  <aside id="railL" class="rail">
+    <section class="card" id="needCard">
+      <div class="card-head"><h2>The need</h2><span class="card-meta" id="needMeta">buyer's own words</span></div>
+      <textarea id="needText" rows="7" spellcheck="false">After-hours calls for urgent-care clinics in Houston. Callers switch between Spanish and English mid-sentence, they're on cell phones in noisy rooms, and they read out prescriptions and callback numbers. I need the transcription layer that gets drug names and callback numbers right — I dial those numbers back.</textarea>
+      <blockquote id="needQuote" class="hidden"></blockquote>
+      <div class="btn-row" id="startRow">
+        <button id="btnStart" class="primary-btn">START RUN<span class="btn-glyph">▸</span></button>
+        <button id="btnMode" class="ghost-btn" title="toggle live / sim">MODE&nbsp;·&nbsp;<b id="btnModeVal">LIVE</b></button>
+      </div>
+      <p class="start-note" id="startNote">
+        <b>START RUN</b> computes it for real — LLM, TTS, DSP, vendors — and takes 60–90 s.
+        <b>▶ PLAY DEMO</b> (top right, or <kbd>SPACE</kbd>) replays the recorded run instantly.
+      </p>
+    </section>
+
+    <section class="card enterable hidden" id="thoughtCard">
+      <div class="card-head"><h2>Exam compiler</h2><span class="card-meta" id="thoughtMeta">agent rationale</span></div>
+      <div id="thoughtStream"><span id="thoughtText"></span><span id="caret"></span></div>
+      <p id="planLine" class="plan-line hidden"></p>
+    </section>
+
+    <div id="strataList"></div>
+  </aside>
+
+  <!-- ══════════ CENTER — probe + race ══════════ -->
+  <section id="center">
+    <section class="card" id="probeCard">
+      <div class="card-head">
+        <h2>Current probe</h2>
+        <div class="probe-title">
+          <span id="probeId" class="mono-chip accent">—</span>
+          <span id="probeStratum" class="card-meta">waiting for synthesis</span>
+        </div>
+        <div id="probeChips" class="chip-row"></div>
+      </div>
+      <div class="wave-row">
+        <button id="btnPlay" class="play-btn" aria-label="play probe audio" disabled>
+          <svg viewBox="0 0 24 24" id="icoPlay"><path d="M8 5.5v13l11-6.5z"/></svg>
+          <svg viewBox="0 0 24 24" id="icoStop" class="hidden"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+        </button>
+        <canvas id="wave"></canvas>
+        <span id="waveDur" class="wave-dur num"></span>
+      </div>
+      <div id="diffWrap" class="hidden">
+        <div id="vendorTabs" class="vtab-row"></div>
+        <div class="diff-strip">
+          <div class="diff-line"><span class="diff-key">REF</span><span id="diffRef" class="diff-text"></span></div>
+          <div class="diff-line"><span class="diff-key">HYP</span><span id="diffHyp" class="diff-text"></span></div>
+        </div>
+        <div class="diff-foot">
+          <div id="entChips" class="chip-row"></div>
+          <div id="resStats" class="res-stats num"></div>
+        </div>
+      </div>
+      <div id="probeIdle" class="idle-note">— synthesizing probe battery —</div>
+    </section>
+
+    <section class="card" id="boardCard">
+      <div class="card-head">
+        <h2>Vendor race</h2>
+        <span class="card-meta">decision-relevant error · dot = mean · whiskers = 95% CI</span>
+      </div>
+      <div class="board-scroll">
+        <div class="board-cols hidden" id="boardCols">
+          <span></span><span></span>
+          <span class="ci-axis" id="ciAxis"></span>
+          <span class="c-num">ERR</span><span class="c-num">WER</span><span class="c-num">LAT</span>
+          <span class="c-num">SPEND</span><span class="c-num">P(BEST)</span>
+        </div>
+        <div id="boardRows"></div>
+        <div id="boardIdle" class="idle-note">— vendors register at race start —</div>
+      </div>
+      <div id="boardLog"></div>
+    </section>
+  </section>
+
+  <!-- ══════════ RIGHT RAIL — budget + memo ══════════ -->
+  <aside id="railR" class="rail">
+    <section class="card" id="costCard">
+      <div class="card-head"><h2>Budget</h2><span class="card-meta" id="budgetCap">cap $2.00</span></div>
+      <div class="cost-big num" id="costBig">0.0¢</div>
+      <div class="meter"><div class="meter-fill" id="budgetFill"></div></div>
+      <div class="cost-foot">
+        <span id="budgetLabel" class="num">$0.00 of $2.00</span>
+        <span id="probesRun" class="num">0 probes</span>
+      </div>
+    </section>
+
+    <section class="card enterable pending" id="memoCard">
+      <div class="card-head"><h2>Decision memo</h2><span class="card-meta" id="memoMeta">lands with the verdict</span></div>
+      <div id="memoPending">
+        <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+        <div class="skel-note">P(best) · receipts · canary — pending</div>
+      </div>
+      <div class="memo-winner" id="memoWinner">
+        <span class="v-dot" id="memoDot"></span>
+        <div class="memo-winner-name">
+          <b id="memoName">—</b>
+          <span id="memoSub" class="card-meta">winner</span>
+        </div>
+        <div class="memo-pb">
+          <label>P(BEST)</label>
+          <span id="memoPB" class="num">—</span>
+        </div>
+      </div>
+      <p id="memoHeadline" class="memo-headline"></p>
+      <div id="memoBody" class="memo-body"></div>
+    </section>
+  </aside>
+</main>
+
+<!-- ══════════ ACT 3 TAKEOVER ══════════ -->
+<section id="sting" class="hidden" aria-hidden="true">
+  <p id="stingExplain" class="sting-explain">a sixth vendor joins the race…</p>
+
+  <div class="panels">
+    <section class="panel" id="panelNaive">
+      <div class="p-head">
+        <h3>NAIVE EXAM</h3>
+        <span class="p-status chip" id="statusNaive">WAITING</span>
+      </div>
+      <div class="p-probe" id="probeStripNaive">
+        <button class="play-btn mini" data-panel="naive" aria-label="play probe">
+          <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>
+        </button>
+        <canvas class="mini-wave" id="waveNaive"></canvas>
+        <div class="p-probe-meta">
+          <span class="mono-chip" id="pidNaive">—</span>
+          <div class="camo"><label>P(test-shaped)</label>
+            <div class="camo-meter"><div class="camo-fill" id="camoNaive"></div></div>
+            <span class="num" id="camoValNaive">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="p-board" id="boardNaive"></div>
+      <div class="p-viz">
+        <div class="gauge-block">
+          <svg id="gaugeNaive" viewBox="0 0 220 132"></svg>
+          <div class="gauge-cap">discriminator AUC<span id="gaugeWordNaive" class="gauge-word">—</span></div>
+        </div>
+        <div class="feat-block">
+          <h4>WHAT THE DEVICE SNIFFS</h4>
+          <div id="featList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panelStealth">
+      <div class="p-head">
+        <h3>VET STEALTH EXAM</h3>
+        <span class="p-status chip" id="statusStealth">WAITING</span>
+      </div>
+      <div class="p-probe" id="probeStripStealth">
+        <button class="play-btn mini" data-panel="stealth" aria-label="play probe">
+          <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>
+        </button>
+        <canvas class="mini-wave" id="waveStealth"></canvas>
+        <div class="p-probe-meta">
+          <span class="mono-chip" id="pidStealth">—</span>
+          <div class="camo"><label>P(test-shaped)</label>
+            <div class="camo-meter"><div class="camo-fill" id="camoStealth"></div></div>
+            <span class="num" id="camoValStealth">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="p-board" id="boardStealth"></div>
+      <div class="p-viz">
+        <div class="gauge-block">
+          <svg id="gaugeStealth" viewBox="0 0 220 132"></svg>
+          <div class="gauge-cap">discriminator AUC<span id="gaugeWordStealth" class="gauge-word">—</span></div>
+        </div>
+        <div class="cusum-block">
+          <h4>CUSUM — QUALITY RESIDUAL<span id="lastMiss" class="last-miss num"></span></h4>
+          <svg id="cusum" viewBox="0 0 360 168"></svg>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="banner" class="hidden">
+    <div class="banner-main">
+      <svg class="banner-ico" viewBox="0 0 24 24"><path d="M12 2.2 23 21H1L12 2.2zm-1.1 7v6h2.2v-6h-2.2zm0 7.6v2.2h2.2v-2.2h-2.2z"/></svg>
+      <span class="banner-text">DEFEAT&nbsp;DEVICE&nbsp;DETECTED</span>
+    </div>
+    <div class="banner-sub">
+      <span id="bannerDetail"></span>
+      <span class="chip-row" id="bannerChips"></span>
+    </div>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
