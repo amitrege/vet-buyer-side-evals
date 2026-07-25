@@ -13,7 +13,8 @@ __pycache__/
 vet/cache/
 vet/runs/
 vet/ui/clips/*
-!vet/ui/clips/p14e0d7a4.wav   # hero clip used by the pitch deck
+# hero clip used by the hosted pitch deck (inline comments break negations)
+!vet/ui/clips/p14e0d7a4.wav
 vet/ui/*.jsonl
 
 # Downloaded research material and reference repositories
