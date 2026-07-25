@@ -228,6 +228,19 @@ h1 em{font-style:normal;color:var(--amber)}
 .punch em{font-style:normal;color:var(--amber)}
 
 /* ---------- slide 9 : defeat device ---------- */
+/* A/B listen buttons — the cloak is the one claim you can verify with your ears */
+.ab{display:flex;align-items:center;gap:.7rem;margin:.7rem 0 0;padding:.55rem .9rem .55rem .6rem;
+  background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.14);border-radius:999px;
+  color:inherit;font:inherit;cursor:pointer;text-align:left;
+  transition:background .25s var(--ease),border-color .25s var(--ease),transform .25s var(--ease)}
+.ab:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.3);transform:translateY(-1px)}
+.ab .abd{flex:0 0 auto;width:2rem;height:2rem;border-radius:50%;display:grid;place-items:center;
+  background:var(--amber,#e0a24a);color:#111;font-size:.8rem;line-height:1}
+.ab.on .abd{background:var(--green,#3fe38f);animation:abp 1.1s ease-in-out infinite}
+@keyframes abp{50%{transform:scale(1.08)}}
+.ab .abt{display:flex;flex-direction:column;line-height:1.25}
+.ab .abt b{font-size:.95rem;font-weight:650}
+.ab .abt i{font-style:normal;opacity:.6;font-size:.78rem}
 .beat2{opacity:0;transform:translateY(16px);transition:opacity .7s var(--ease),transform .7s var(--ease);
   pointer-events:none;height:0;overflow:hidden}
 .slide[data-beat="2"] .beat2{opacity:1;transform:none;pointer-events:auto;height:auto;overflow:visible}
@@ -463,8 +476,16 @@ h1 em{font-style:normal;color:var(--amber)}
           </div>
           <div>
             <p class="say beat1only an" style="--d:.58s">Our first exam sounded like a <span class="hi">lab recording</span>. The vendor spotted it every single time — and topped the leaderboard.</p>
+            <button class="ab beat1only an" style="--d:.66s" type="button"
+                    data-audio="clips/demo_naive.wav" data-lbl="Hear the old test">
+              <span class="abd">▶</span><span class="abt"><b>Hear the old test</b><i>clean studio recording — obviously a test</i></span>
+            </button>
             <div class="beat2">
               <p class="say">So we made the tests sound exactly like the buyer's <span class="hi">real calls</span> — same noise, same phone line, same mess. Now it can't tell.</p>
+              <button class="ab" type="button"
+                      data-audio="clips/demo_stealth.wav" data-lbl="Hear the cloaked test">
+                <span class="abd">▶</span><span class="abt"><b>Hear the cloaked test</b><i>same words · same answer · sounds like a real call</i></span>
+              </button>
               <div class="err-jump">
                 <div class="pill a"><b>7%</b><span>error on the lab test</span></div>
                 <div class="to">→</div>
@@ -877,6 +898,42 @@ h1 em{font-style:normal;color:var(--amber)}
   };
 
   window.addEventListener("error", function(e){ try{ e.preventDefault(); }catch(x){} });
+  /* A/B listen buttons. One <audio> shared by all of them, so starting a second
+     clip always stops the first — hearing the two overlap would destroy the very
+     comparison the slide is making. */
+  try{
+    var abAudio = new Audio(), abCur = null;
+    function abStop(){
+      try{ abAudio.pause(); }catch(e){}
+      if(abCur){ abCur.classList.remove("on"); abCur.querySelector(".abd").textContent = "▶";
+                 var b=abCur.querySelector(".abt b"); if(b) b.textContent = abCur.getAttribute("data-lbl"); }
+      abCur = null;
+    }
+    abAudio.addEventListener("ended", abStop);
+    abAudio.addEventListener("error", function(){
+      if(abCur){ var i=abCur.querySelector(".abt i"); if(i) i.textContent="audio unavailable"; }
+      abStop();
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-audio]"), function(btn){
+      btn.addEventListener("click", function(ev){
+        ev.stopPropagation();                    // a click here must not advance the slide
+        var was = (abCur === btn);
+        abStop();
+        if(was) return;                          // second click = stop
+        abCur = btn;
+        btn.classList.add("on");
+        btn.querySelector(".abd").textContent = "■";
+        var b = btn.querySelector(".abt b"); if(b) b.textContent = "Playing…";
+        abAudio.src = btn.getAttribute("data-audio");
+        var p = abAudio.play();
+        if(p && p.catch) p.catch(function(){ abStop(); });
+      });
+    });
+    document.addEventListener("keydown", function(e){
+      if(e.key === "Escape") abStop();
+    });
+  }catch(e){}
+
 })();
 </script>
 </body>
