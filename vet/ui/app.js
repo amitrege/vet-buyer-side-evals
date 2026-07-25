@@ -1148,28 +1148,29 @@ const startDemo = safe(async () => {
   setDemoBtn('❚❚&nbsp;PAUSE', 'SPACE');
   $('#btnDemo').classList.add('playing');
   await replay.start();
-  if (JUMP > 0) { replay.seek(JUMP); if (PAUSE) toggleDemo(); }
+  if (JUMP > 0) { replay.seek(JUMP); if (PAUSE) pauseDemo(); }
 });
 
-/* SPACE / ENTER — start it, then pause and resume it. */
-const toggleDemo = safe(() => {
-  if (!replayMode && state.started) {   // a live run is in flight: hard-cut to the recording
-    location.href = location.pathname + '?demo=1';
-    return;
-  }
+function pauseDemo() {
+  replay.pause();
+  setDemoBtn('▶&nbsp;RESUME', 'SPACE');
+  $('#btnDemo').classList.remove('playing');
+  nodes.modeChip.textContent = 'REPLAY · PAUSED';
+}
+function resumeDemo() {
+  replay.resume();
+  setDemoBtn('❚❚&nbsp;PAUSE', 'SPACE');
+  $('#btnDemo').classList.add('playing');
+  setModeChip();
+}
+
+/* SPACE / ENTER — start it, then pause and resume it. `explicit` is a click on
+   the button: only that may abandon a live run that is already in flight. */
+const toggleDemo = safe(explicit => {
   if (replay.ended) { location.href = location.pathname + '?demo=1'; return; }
-  if (!replay.playing && !state.started) { startDemo(); return; }
-  if (replay.playing) {
-    replay.pause();
-    setDemoBtn('▶&nbsp;RESUME', 'SPACE');
-    $('#btnDemo').classList.remove('playing');
-    nodes.modeChip.textContent = 'REPLAY · PAUSED';
-  } else {
-    replay.resume();
-    setDemoBtn('❚❚&nbsp;PAUSE', 'SPACE');
-    $('#btnDemo').classList.add('playing');
-    setModeChip();
-  }
+  if (!replayMode && state.started) { if (explicit) location.href = location.pathname + '?demo=1'; return; }
+  if (!state.started) { startDemo(); return; }
+  replay.playing ? pauseDemo() : resumeDemo();
 });
 
 const setSpeed = safe(v => {
@@ -1200,7 +1201,7 @@ const jumpToAct = safe(async n => {
   location.href = `${location.pathname}?demo=1&jump=${t.toFixed(2)}&speed=${speed}`;
 });
 
-$('#btnDemo').addEventListener('click', toggleDemo);
+$('#btnDemo').addEventListener('click', () => toggleDemo(true));
 $('#btnStart').addEventListener('click', startRun);
 $('#btnMode').addEventListener('click', safe(() => {
   if (replayMode) return;
@@ -1227,7 +1228,7 @@ window.addEventListener('keydown', safe(e => {
   const tag = (e.target && e.target.tagName) || '';
   if (tag === 'TEXTAREA' || tag === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
-  if (k === ' ' || k === 'Spacebar' || k === 'Enter') { e.preventDefault(); toggleDemo(); }
+  if (k === ' ' || k === 'Spacebar' || k === 'Enter') { e.preventDefault(); toggleDemo(false); }
   else if (k === '1' || k === '2' || k === '3') { e.preventDefault(); jumpToAct(+k); }
   else if (k === ']' || k === '+' || k === '=') { setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(speed) + 1)] || 4); }
   else if (k === '[' || k === '-') { setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(speed) - 1)] || 1); }
