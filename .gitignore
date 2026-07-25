@@ -1,18 +1,24 @@
-# secrets — never commit
+# Local credentials and configuration
 .env
 .env.*
-!.env.example
+.claude/
 
-# local env
+# Python environments and bytecode
 .venv/
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
 
-# generated artifacts (regenerate with ./run.sh)
+# Generated Vet artifacts
 vet/cache/
 vet/runs/
 vet/ui/clips/
+vet/ui/*.jsonl
 
-# third-party corpora downloaded for research
+# Downloaded research material and reference repositories
 papers/
 code/
+ANALYSIS.md
+
+# OS metadata
+.DS_Store

@@ -219,6 +219,35 @@ def memo(plan, race: Race, probes_run: int, saved: int, mode: str) -> dict:
 LIVE: dict = {"client": None, "sem": None, "ids": set()}
 
 
+async def preflight(em: Emitter, plan) -> tuple[bool, str]:
+    """Check our own instrument before trusting anything it says.
+
+    Live transcription over a real voice platform silently returns *nothing* for
+    some clips — the call connects, bills, and yields an empty transcript. Scored
+    naively that reads as "every vendor failed", which collapses all of them onto
+    the same number and produces a confident-looking three-way tie made entirely
+    of our own broken plumbing. So: fire a couple of canaries first, and if the
+    apparatus can't hear its own audio, say so and fall back rather than report a
+    verdict built on silence.
+    """
+    probes = [synth_probe(plan.strata[0].id, plan.strata[0].template,
+                          plan.strata[0].channel, seed=990001 + i) for i in range(2)]
+    vendors = sorted(LIVE["ids"])[:2]
+    got = await asyncio.gather(*[LIVE["client"].transcribe(v, p.audio_path)
+                                 for p in probes for v in vendors],
+                               return_exceptions=True)
+    ok = sum(1 for r in got
+             if not isinstance(r, Exception) and (r.get("hyp") or "").strip())
+    rate = ok / max(1, len(got))
+    await em.emit("preflight", ok=ok, total=len(got), pass_rate=round(rate, 2),
+                  healthy=rate >= 0.75)
+    if rate >= 0.75:
+        return True, ""
+    return False, (f"live transcription returned usable audio for only {ok}/{len(got)} "
+                   f"canary probes — measuring vendors through a broken instrument "
+                   f"would score our own failures as theirs")
+
+
 async def run_vendor(mode: str, vendor_id: str, probe):
     """One probe against one vendor. `live` really dials it; `sim` models it."""
     if mode == "live" and LIVE["client"] and vendor_id in LIVE["ids"]:
@@ -424,6 +453,13 @@ async def ws_endpoint(ws: WebSocket):
                               live_vendors=sorted(LIVE["ids"]) if mode == "live" else [])
                 plan = await act_compile(em, need)
                 state["plan"] = plan
+                if mode == "live":
+                    healthy, why = await preflight(em, plan)
+                    if not healthy:
+                        mode = "sim"
+                        fleet = list(FLEET)
+                        await em.emit("mode", mode="sim", degraded=True, reason=why,
+                                      vendors=[v.id for v in fleet], live_vendors=[])
                 await em.emit("phase", phase="race", title="The race",
                               subtitle="Spend only where the leaders still overlap")
                 probes = await synthesize(em, plan)

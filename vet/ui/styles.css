@@ -233,6 +233,17 @@ body.act3 #main { display: none; }
   white-space: pre-wrap; word-break: break-word;
   max-height: 240px; overflow-y: auto;
 }
+.plan-line {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px;
+  font: 13px/1.45 var(--sans); color: var(--ink-2);
+}
+.plan-line b { color: var(--ink); font-weight: 600; }
+.plan-line span {
+  font: 10.5px/1.4 var(--mono); letter-spacing: .04em; color: var(--muted);
+  text-transform: uppercase;
+}
+
 #caret {
   display: inline-block; width: 8px; height: 15px;
   background: var(--accent); vertical-align: -2px; margin-left: 2px;

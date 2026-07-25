@@ -875,7 +875,35 @@ const handlers = {
 
   thought: safe(ev => {
     $('#thoughtCard').classList.remove('hidden');
+    $('#thoughtStream').classList.remove('hidden');
     tw.push(ev.text || '');
+  }),
+
+  /* Which stack produced the numbers. A replayed run still says whether the
+     vendors it raced were real or simulated — the recording never launders that. */
+  mode: safe(ev => {
+    state.runMode = ev.mode;
+    const c = $('#srcChip');
+    const n = (ev.live_vendors || []).length;
+    c.textContent = ev.mode === 'live' ? `VENDORS · LIVE ×${n}` : 'VENDORS · SIM';
+    c.classList.remove('hidden');
+    c.classList.toggle('chip-mode', true);
+    c.classList.toggle('live', ev.mode === 'live');
+    c.classList.toggle('sim', ev.mode !== 'live');
+  }),
+
+  /* The compiled exam itself. The model's streamed reasoning is a bonus — some
+     responses carry no summarised thinking at all — but the plan always lands,
+     so the compiler card is never an empty box. */
+  plan: safe(ev => {
+    $('#thoughtCard').classList.remove('hidden');
+    const line = $('#planLine');
+    line.innerHTML = `<b>${esc(ev.headline || '')}</b>` +
+      `<span>decision metric — ${esc(ev.decision_metric || '')}</span>`;
+    line.classList.remove('hidden');
+    $('#thoughtMeta').textContent =
+      ev.source === 'agent' ? 'claude — streamed plan' : 'cached plan (compiler offline)';
+    if (!tw.shown && !tw.queue) $('#thoughtStream').classList.add('hidden');
   }),
 
   stratum: safe(ev => {
