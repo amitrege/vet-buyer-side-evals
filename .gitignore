@@ -9,13 +9,9 @@ venv/
 __pycache__/
 *.py[cod]
 
-# Generated Vet artifacts
+# Generated Vet artifacts (probe audio, TTS cache, run logs)
 vet/cache/
 vet/runs/
-vet/ui/clips/*
-# hero clip used by the hosted pitch deck (inline comments break negations)
-!vet/ui/clips/p14e0d7a4.wav
-vet/ui/*.jsonl
 
 # Downloaded research material and reference repositories
 papers/

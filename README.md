@@ -1,7 +1,6 @@
 # Vet — the pre-flight check for agents that spend money
 
-### ▶ [**Watch the demo**](https://amitrege.github.io/vet-buyer-side-evals/) — 9 slides, ~2 min, plays in the browser with real audio
-
+### ▶ [**Watch the demo**](https://amitrege.github.io/vet-buyer-side-evals/) — a ~2 minute slide walkthrough, plays in the browser with real audio
 
 **Public benchmarks are dyno tests. Vet does road tests.**
 
@@ -10,20 +9,39 @@ disposable exam for *that buyer's* job, races real vendors under a cost budget,
 returns a verdict with a confidence level and a price tag — then keeps a canary
 running so it notices when the vendor quietly gets worse.
 
-## Run it
+The demo is one self-contained page (`index.html`) plus the audio it plays
+(`clips/`). Every number and transcript in it comes from a recorded run of the
+engine in this repo.
+
+## Run the engine
+
+The pipeline uses macOS `say` and `afconvert` to create speech, so run it on
+macOS with Python 3.11 or newer.
 
 ```bash
-./run.sh                 # http://localhost:8787
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+./run.sh                      # = python -m vet: the full three-act exam, in the terminal
 ```
 
-Open the page, press **START**, then **CUE ACT 3** when the verdict lands.
+- **SIM** (the default) races calibrated local vendor models — no speech-vendor
+  APIs are called. Probe synthesis, scoring, and the decision policy are the
+  real implementations.
+- **LIVE** (`./run.sh --mode live`) races real speech vendors through Vapi.
+  Copy `.env.example` to `.env.vapi` and add credentials; never commit that
+  file. If preflight cannot get usable transcripts, the run clearly marks the
+  downgrade and falls back to SIM.
+- Set `ANTHROPIC_API_KEY` to let the compiler write a fresh exam plan for your
+  own need (`--need "..."`). Without it, Vet uses its built-in Houston
+  urgent-care plan.
+- Every run's full event stream lands in `vet/runs/<id>.jsonl`
+  (format: `vet/SPEC.md`).
 
-- `?replay=1&speed=3` — replay the bundled fixture (stage-safe, no network)
-- `?replay=<run_id>` — replay any real run from `vet/runs/`
-- Mode `live` in the UI hits **real speech vendors** through Vapi
-  (Deepgram Nova-3, AssemblyAI Universal, OpenAI gpt-4o-transcribe, Gladia);
-  `sim` uses a locally calibrated model of the same vendors. The UI always
-  labels which produced a number.
+Run the regression tests with:
+
+```bash
+./.venv/bin/python -m unittest discover -s tests -v
+```
 
 ## The three acts
 
@@ -41,10 +59,12 @@ stops when P(best) crosses the bar or the money runs out.
 
 **3 — The sting.** `ShadyTranscribe` runs a *defeat device*: it classifies incoming
 traffic and serves a premium stack to anything that looks like a test. Against a
-studio-clean benchmark it is caught 38/38 (discriminator **AUC 1.0**) and tops the
-leaderboard. Against probes drawn from the buyer's own channel distribution the
-discriminator collapses to **AUC ≈ 0.50 — chance** — the cheap stack gets served, error
-jumps ~7% → ~53%, and CUSUM alarms within a handful of probes.
+studio-clean benchmark it is caught 38/38 (discriminator **AUC 1.0**) and looks
+suspiciously strong near the top. Against probes drawn from the buyer's own
+channel distribution, the discriminator collapses to **AUC ≈ 0.50 — chance** —
+the cheap stack gets served, error
+jumps by about 28 percentage points in the recorded run, and CUSUM alarms within
+a handful of probes.
 
 ## Why the scoring has no LLM in it
 
@@ -56,6 +76,8 @@ digit normalisation. A vendor cannot prompt-inject an edit distance.
 
 | file | what it is |
 |---|---|
+| `index.html` | the demo — one self-contained slide deck, no dependencies |
+| `clips/` | the real probe audio the deck plays |
 | `vet/compiler.py` | Claude picks the strata; streams its reasoning; deterministic fallback |
 | `vet/probes.py` | code-switched script generation + entity ground truth |
 | `vet/dsp.py` | the channel: babble, G.711, reverb, dropouts, AGC — and the features a defeat device would read |
@@ -63,8 +85,8 @@ digit normalisation. A vendor cannot prompt-inject an edit distance.
 | `vet/race.py` | successive elimination, stopping rule, spend accounting |
 | `vet/sting.py` | discriminator, AUC, defeat device, CUSUM |
 | `vet/vapi.py` | live vendor calls over Vapi websocket transport |
-| `vet/server.py` | orchestration + event stream + replay log |
-| `vet/ui/` | the instrument |
+| `vet/exam.py` | orchestration: the three acts, the event stream, the run log |
+| `vet/__main__.py` | the terminal front door (`python -m vet`) |
 
 ## Known limits
 

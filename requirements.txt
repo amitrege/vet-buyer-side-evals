@@ -1,0 +1,5 @@
+anthropic==0.120.0
+httpx==0.28.1
+numpy==2.5.1
+scipy==1.18.0
+websockets==16.1.1

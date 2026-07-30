@@ -16,7 +16,7 @@ import os
 import subprocess
 import tempfile
 import wave
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from scipy import signal
@@ -83,19 +83,6 @@ def trim_silence(x: np.ndarray, thresh: float = 2e-3) -> np.ndarray:
         return x
     pad = int(0.02 * SR)
     return x[max(0, idx[0] - pad): idx[-1] + pad]
-
-
-def concat(segments: list[np.ndarray], gap_s: float = 0.06,
-           rng: np.random.Generator | None = None) -> np.ndarray:
-    """Join segments with small, slightly randomised gaps (human-ish pacing)."""
-    rng = rng or np.random.default_rng(0)
-    out = []
-    for i, s in enumerate(segments):
-        out.append(trim_silence(s))
-        if i != len(segments) - 1:
-            g = max(0.0, gap_s + rng.normal(0, gap_s * 0.4))
-            out.append(np.zeros(int(g * SR), dtype=np.float32))
-    return np.concatenate(out) if out else np.zeros(1, dtype=np.float32)
 
 
 # ------------------------------------------------------------------ the channel

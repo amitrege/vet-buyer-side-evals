@@ -13,10 +13,10 @@ leaderboard and this buyer's traffic.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import random
 import re
-import time
 from dataclasses import dataclass
 
 from .probes import ES_DIGIT, EN_DIGIT, Probe
@@ -43,6 +43,27 @@ FLEET = [
 
 SHADY = Vendor("shady", "ShadyTranscribe", {"transcriber": "shady/adaptive-v2"}, 0.09, None,
                "New entrant. Suspiciously good benchmark numbers, suspiciously cheap.")
+
+
+def fresh_fleet(include_shady: bool = False) -> list[Vendor]:
+    """Build clean runtime vendor objects from the module-level configuration.
+
+    A race records eliminations, spend, and latency samples on each ``Vendor``.
+    Reusing the configuration objects would therefore leak one race's state into
+    the next one. Every independent comparison gets its own copies instead.
+    """
+    configured = [*FLEET, *([SHADY] if include_shady else [])]
+    return [
+        Vendor(
+            id=v.id,
+            name=v.name,
+            stack=deepcopy(v.stack),
+            price_per_hr=v.price_per_hr,
+            public_rank=v.public_rank,
+            note=v.note,
+        )
+        for v in configured
+    ]
 
 
 # ------------------------------------------------------------------ profiles
@@ -149,22 +170,3 @@ PRICE = {v.id: v.price_per_hr for v in FLEET}
 PRICE["shady_premium"] = SHADY.price_per_hr
 PRICE["shady_cheap"] = SHADY.price_per_hr
 PRICE["shady"] = SHADY.price_per_hr
-
-
-# --------------------------------------------------------------- live adapter
-
-class LiveAdapter:
-    """Send probe audio to a real speech stack.
-
-    Wired to Vapi: each vendor is an assistant that differs only in its
-    `transcriber` block, so one key buys us six genuinely different vendor
-    stacks and the comparison stays apples-to-apples.
-    """
-
-    def __init__(self, client):
-        self.client = client
-
-    async def transcribe(self, vendor_id: str, probe: Probe) -> tuple[str, int, float]:
-        t0 = time.time()
-        hyp = await self.client.transcribe(vendor_id, probe.audio_path)
-        return hyp, int((time.time() - t0) * 1000), probe.duration_s / 3600.0 * PRICE[vendor_id]

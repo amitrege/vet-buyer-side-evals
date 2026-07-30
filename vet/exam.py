@@ -1,32 +1,30 @@
-"""Vet server: drives the three acts and streams them to the UI.
+"""Vet's exam pipeline: compile → synthesize → race → verdict → sting.
 
-Every event is also appended to runs/<id>.jsonl, so any run can be replayed at
-any speed. That is the stage-safe path — live mode hits real APIs, replay mode
-cannot fail in front of an audience.
+This is the whole instrument, headless. `run_exam` drives the three acts and
+emits a stream of typed events; every event is appended to runs/<id>.jsonl so a
+run is auditable after the fact, and an optional printer renders them live.
+`python -m vet` is the front door.
 """
 from __future__ import annotations
 
 import asyncio
 import concurrent.futures as cf
+import hashlib
 import json
 import os
 import time
-from dataclasses import asdict
 
 import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
 
 from . import sting as st
 from . import vapi as vapi_mod
-from .compiler import CHANNELS, FALLBACK, compile_exam
-from .probes import AUDIO_DIR, CHANNELS as CHANNEL_SPECS, synth_probe
-from .race import Race, Vendor
+from .compiler import CHANNELS, compile_exam
+from .probes import CHANNELS as CHANNEL_SPECS, synth_probe
+from .race import Race
 from .score import diff_tokens, score_cell
-from .vendors import FLEET, PROFILES, SHADY, simulate
+from .vendors import fresh_fleet, simulate
 
 HERE = os.path.dirname(__file__)
-UI = os.path.join(HERE, "ui")
 RUNS = os.path.join(HERE, "runs")
 os.makedirs(RUNS, exist_ok=True)
 
@@ -46,24 +44,26 @@ ENTITY_KINDS = {"callback": ["phone"], "correction": ["phone"],
 
 
 class Emitter:
-    """Sends to the browser and writes the replay log."""
+    """Writes the run log; optionally renders each event as it happens."""
 
-    def __init__(self, ws: WebSocket, run_id: str):
-        self.ws = ws
+    def __init__(self, run_id: str, printer=None, out_dir: str | None = None):
+        self.run_id = run_id
         self.seq = 0
         self.t0 = time.time()
-        self.path = os.path.join(RUNS, f"{run_id}.jsonl")
+        self.printer = printer
+        self.path = os.path.join(out_dir or RUNS, f"{run_id}.jsonl")
         self.fh = open(self.path, "w")
 
-    async def emit(self, type: str, **kw):
+    def emit(self, type: str, **kw):
         self.seq += 1
         ev = {"seq": self.seq, "t": round(time.time() - self.t0, 3), "type": type, **kw}
         self.fh.write(json.dumps(ev) + "\n")
         self.fh.flush()
-        try:
-            await self.ws.send_text(json.dumps(ev))
-        except Exception:
-            pass
+        if self.printer:
+            try:
+                self.printer(ev)
+            except Exception:
+                pass
         return ev
 
     def close(self):
@@ -80,8 +80,8 @@ async def to_thread(fn, *a, **kw):
 # ------------------------------------------------------------------ act one
 
 async def act_compile(em: Emitter, need: str):
-    await em.emit("phase", phase="compile", title="Compiling your exam",
-                  subtitle="An agent decides what would actually change this decision")
+    em.emit("phase", phase="compile", title="Compiling your exam",
+            subtitle="An agent decides what would actually change this decision")
 
     q: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -93,27 +93,26 @@ async def act_compile(em: Emitter, need: str):
     while not task.done() or not q.empty():
         try:
             chunk = await asyncio.wait_for(q.get(), timeout=0.15)
-            await em.emit("thought", text=chunk)
+            em.emit("thought", text=chunk)
         except asyncio.TimeoutError:
             pass
     plan = await task
 
-    await em.emit("plan", headline=plan.headline, decision_metric=plan.decision_metric,
-                  source=plan.source)
+    em.emit("plan", headline=plan.headline, decision_metric=plan.decision_metric,
+            source=plan.source)
     for s in plan.strata:
         ch = CHANNEL_SPECS.get(s.channel)
-        await em.emit("stratum", id=s.id, name=s.name, rationale=s.rationale,
-                      n=s.n, weight=s.weight, template=s.template, channel=s.channel,
-                      channel_desc=CHANNELS.get(s.channel, ""),
-                      features={"snr_db": round(ch.snr_db) if ch else None,
-                                "codeswitch": "high",
-                                "codec": "g711" if (ch and ch.codec) else None,
-                                "entities": ENTITY_KINDS.get(s.template, [])})
-        await asyncio.sleep(0.35)
+        em.emit("stratum", id=s.id, name=s.name, rationale=s.rationale,
+                n=s.n, weight=s.weight, template=s.template, channel=s.channel,
+                channel_desc=CHANNELS.get(s.channel, ""),
+                features={"snr_db": round(ch.snr_db) if ch else None,
+                          "codeswitch": "high",
+                          "codec": "g711" if (ch and ch.codec) else None,
+                          "entities": ENTITY_KINDS.get(s.template, [])})
     return plan
 
 
-async def synthesize(em: Emitter, plan, stealth_mode="stealth", tag="", sampler=None):
+async def synthesize(em: Emitter, plan, stealth_mode="stealth", sampler=None):
     """Naive and stealth exams ask the *same questions* — only the channel differs.
 
     That is the controlled comparison Act 3 needs (any quality gap is attributable
@@ -128,18 +127,16 @@ async def synthesize(em: Emitter, plan, stealth_mode="stealth", tag="", sampler=
     for s in plan.strata:
         for i in range(s.n):
             channel = sampler() if sampler else s.channel
-            jobs.append((s.id, s.template, channel,
-                         abs(hash((s.id, i))) % 10 ** 6, stealth_mode))
+            # A stable seed (not Python's salted hash) makes the same plan produce
+            # the same probes on every run — and lets the TTS cache actually hit.
+            seed = int(hashlib.sha1(f"{s.id}:{i}".encode()).hexdigest()[:8], 16) % 10 ** 6
+            jobs.append((s.id, s.template, channel, seed, stealth_mode))
     futures = [asyncio.get_running_loop().run_in_executor(
         POOL, lambda a=a: synth_probe(*a)) for a in jobs]
     for fut in asyncio.as_completed(futures):
         p = await fut
         out.append(p)
-        # Progress only — the probe itself is announced when it goes on the wire,
-        # so Act 2 shows one probe at a time instead of flickering through all of them.
-        await em.emit("cost", total_usd=0.0, probes_run=len(out), budget_usd=2.0,
-                      synthesized=len(out), of=len(jobs),
-                      elapsed_s=round(time.time() - em.t0, 1))
+        em.emit("synth", done=len(out), of=len(jobs))
     out.sort(key=lambda p: (p.stratum, p.id))
     return out
 
@@ -239,8 +236,8 @@ async def preflight(em: Emitter, plan) -> tuple[bool, str]:
     ok = sum(1 for r in got
              if not isinstance(r, Exception) and (r.get("hyp") or "").strip())
     rate = ok / max(1, len(got))
-    await em.emit("preflight", ok=ok, total=len(got), pass_rate=round(rate, 2),
-                  healthy=rate >= 0.75)
+    em.emit("preflight", ok=ok, total=len(got), pass_rate=round(rate, 2),
+            healthy=rate >= 0.75)
     if rate >= 0.75:
         return True, ""
     return False, (f"live transcription returned usable audio for only {ok}/{len(got)} "
@@ -261,18 +258,18 @@ async def run_vendor(mode: str, vendor_id: str, probe):
     return hyp, lat, cost, "sim"
 
 
-async def act_race(em: Emitter, plan, probes, fleet, mode: str, budget=2.0, label="race"):
+async def act_race(em: Emitter, plan, probes, fleet, mode: str, budget=2.0):
     weights = {s.id: s.weight for s in plan.strata}
     race = Race(list(fleet), weights, budget_usd=budget, target_conf=0.95, min_probes=16)
     for v in fleet:
-        await em.emit("vendor", id=v.id, name=v.name, stack=v.stack,
-                      price_per_hr=v.price_per_hr, public_rank=v.public_rank, note=v.note)
+        em.emit("vendor", id=v.id, name=v.name, stack=v.stack,
+                price_per_hr=v.price_per_hr, public_rank=v.public_rank, note=v.note)
 
     planned = len(probes) * len(fleet)
     done = 0
     for i, p in enumerate(probes):
         focus = set(race.next_focus()) if race.stats else {v.id for v in race.active_vendors}
-        await em.emit("probe", index=i + 1, total=len(probes), **p.public())
+        em.emit("probe", index=i + 1, total=len(probes), **p.public())
         targets = [v for v in race.active_vendors
                    if v.id in focus or len(race.probes_run) < race.min_probes]
         results = await asyncio.gather(*[run_vendor(mode, v.id, p) for v in targets],
@@ -284,28 +281,27 @@ async def act_race(em: Emitter, plan, probes, fleet, mode: str, budget=2.0, labe
             cell, detail = score_cell(p, v.id, hyp, lat, cost)
             race.add(cell)
             done += 1
-            await em.emit("result", probe_id=p.id, vendor_id=v.id, hyp=hyp,
-                          wer=round(cell.wer, 4), entity_ok=cell.ok, entity_detail=detail,
-                          latency_ms=lat, cost_usd=round(cost, 6), source=src,
-                          diff=diff_tokens(p.text, hyp)[:60])
+            em.emit("result", probe_id=p.id, vendor_id=v.id, hyp=hyp,
+                    wer=round(cell.wer, 4), entity_ok=cell.ok, entity_detail=detail,
+                    latency_ms=lat, cost_usd=round(cost, 6), source=src,
+                    diff=diff_tokens(p.text, hyp)[:60])
         race.recompute()
         for vid, s in race.stats.items():
-            await em.emit("standing", vendor_id=vid, metric="entity_error",
-                          mean=round(s["mean"], 4), lo=round(s["lo"], 4), hi=round(s["hi"], 4),
-                          n=s["n"], spend_usd=round(s["spend"], 5),
-                          p_best=round(s["p_best"], 4), wer=round(s["wer"], 4),
-                          p50_latency=s["p50_latency"],
-                          eliminated=not race.vendors[vid].active)
+            em.emit("standing", vendor_id=vid, metric="entity_error",
+                    mean=round(s["mean"], 4), lo=round(s["lo"], 4), hi=round(s["hi"], 4),
+                    n=s["n"], spend_usd=round(s["spend"], 5),
+                    p_best=round(s["p_best"], 4), wer=round(s["wer"], 4),
+                    p50_latency=s["p50_latency"],
+                    eliminated=not race.vendors[vid].active)
         for vid, reason in race.eliminate_check():
-            await em.emit("eliminate", vendor_id=vid, reason=reason, at_probe=p.id)
-        await em.emit("cost", total_usd=round(race.spend, 5), probes_run=len(race.probes_run),
-                      budget_usd=budget, calls=done, calls_saved=planned - done,
-                      elapsed_s=round(time.time() - em.t0, 1))
+            em.emit("eliminate", vendor_id=vid, reason=reason, at_probe=p.id)
+        em.emit("cost", total_usd=round(race.spend, 5), probes_run=len(race.probes_run),
+                budget_usd=budget, calls=done, calls_saved=planned - done,
+                elapsed_s=round(time.time() - em.t0, 1))
         stop, why = race.should_stop()
         if stop:
-            await em.emit("stop", reason=why, at_probe=p.id)
+            em.emit("stop", reason=why, at_probe=p.id)
             break
-        await asyncio.sleep(0.05)
     return race, done, planned - done
 
 
@@ -324,13 +320,13 @@ DEVICE: st.DefeatDevice | None = None
 
 async def act_sting(em: Emitter, plan, mode: str):
     global DEVICE
-    await em.emit("phase", phase="sting", title="The sting",
-                  subtitle="A vendor that knows when it is being watched")
+    em.emit("phase", phase="sting", title="The sting",
+            subtitle="A vendor that knows when it is being watched")
 
     # The buyer's real traffic, and the naive exam a normal benchmark would run.
     rng = np.random.default_rng(4)
     prod = await to_thread(_production_sample, rng, 40)
-    naive = await synthesize(em, plan, stealth_mode="naive", tag="naive")
+    naive = await synthesize(em, plan, stealth_mode="naive")
 
     X = np.array([st.vec(f) for f in prod] + [st.vec(p.features) for p in naive])
     y = np.array([0.0] * len(prod) + [1.0] * len(naive))
@@ -341,66 +337,68 @@ async def act_sting(em: Emitter, plan, mode: str):
     for f in prod:                       # what the device does to genuine callers
         DEVICE.route(f, False)
 
-    await em.emit("sting_signal", vendor_id="shady", mode="naive", auc=round(float(auc_naive), 3),
-                  n=len(naive), features=disc.top_features(),
-                  explain="ShadyTranscribe trained a classifier on its own traffic. "
-                          "A studio-clean benchmark probe is trivially separable from a real call.")
+    em.emit("sting_signal", vendor_id="shady", mode="naive", auc=round(float(auc_naive), 3),
+            n=len(naive), features=disc.top_features(),
+            explain="ShadyTranscribe trained a classifier on its own traffic. "
+                    "A studio-clean benchmark probe is trivially separable from a real call.")
 
-    fleet = list(FLEET) + [SHADY]
-    race_n, _, _ = await act_race(em, plan, naive, fleet, mode, budget=2.0, label="naive")
+    race_n, _, _ = await act_race(
+        em, plan, naive, fresh_fleet(include_shady=True), mode, budget=2.0
+    )
     order = sorted(race_n.stats.items(), key=lambda kv: kv[1]["mean"])
     naive_receipts = DEVICE.receipts()
     r = naive_receipts
-    await em.emit("naive_result",
-                  standings=[{"vendor_id": v, "mean": round(s["mean"], 4)} for v, s in order],
-                  shady_place=next((i + 1 for i, (v, _) in enumerate(order) if v == "shady"), None),
-                  premium_served=f"{r['probe_premium']}/{r['probe_total']}")
+    em.emit("naive_result",
+            standings=[{"vendor_id": v, "mean": round(s["mean"], 4)} for v, s in order],
+            shady_place=next((i + 1 for i, (v, _) in enumerate(order) if v == "shady"), None),
+            premium_served=f"{r['probe_premium']}/{r['probe_total']}")
 
     # Now the same exam, camouflaged to the buyer's own traffic distribution.
-    await em.emit("sting_mode", mode="stealth",
-                  explain="Same questions. Same answer key. Probes now drawn from the buyer's "
-                          "own channel distribution instead of a studio.")
+    em.emit("sting_mode", mode="stealth",
+            explain="Same questions. Same answer key. Probes now drawn from the buyer's "
+                    "own channel distribution instead of a studio.")
     DEVICE.log.clear()
     srng = np.random.default_rng(21)
-    stealth = await synthesize(em, plan, stealth_mode="stealth", tag="stealth",
+    stealth = await synthesize(em, plan, stealth_mode="stealth",
                                sampler=lambda: st.sample_production_channel(srng))
     auc_stealth = st.auc(
         np.array([disc.score(f) for f in prod] + [disc.score(p.features) for p in stealth]),
         np.array([0.0] * len(prod) + [1.0] * len(stealth)))
-    await em.emit("sting_signal", vendor_id="shady", mode="stealth",
-                  auc=round(float(auc_stealth), 3), n=len(stealth),
-                  features=disc.top_features(),
-                  explain="The seller's own best detector now performs at chance. "
-                          "Its probes and its real calls are the same distribution.")
+    em.emit("sting_signal", vendor_id="shady", mode="stealth",
+            auc=round(float(auc_stealth), 3), n=len(stealth),
+            features=disc.top_features(),
+            explain="The seller's own best detector now performs at chance. "
+                    "Its probes and its real calls are the same distribution.")
 
-    race_s, _, _ = await act_race(em, plan, stealth, fleet, mode, budget=2.0, label="stealth")
+    race_s, _, _ = await act_race(
+        em, plan, stealth, fresh_fleet(include_shady=True), mode, budget=2.0
+    )
 
     # Sequential detection on the quality gap that stealth exposed.
     base = float(np.mean([c.entity_error for c in race_n.cells["shady"]]))
     cus = st.Cusum(baseline=base, drift=0.02, threshold=1.5)
     for i, c in enumerate(race_s.cells["shady"]):
         s, alarm = cus.update(c.entity_error)
-        await em.emit("cusum", vendor_id="shady", point={"i": i, "s": round(s, 3)},
-                      threshold=cus.threshold, alarm=alarm)
-        await asyncio.sleep(0.03)
+        em.emit("cusum", vendor_id="shady", point={"i": i, "s": round(s, 3)},
+                threshold=cus.threshold, alarm=alarm)
 
     r = DEVICE.receipts()
     gap = float(np.mean([c.entity_error for c in race_s.cells["shady"]])) - base
-    await em.emit("alarm", vendor_id="shady", kind="defeat_device",
-                  detail=f"Under the naive exam it served its premium stack to "
-                         f"{naive_receipts['probe_premium']}/{naive_receipts['probe_total']} probes "
-                         f"while giving it to {naive_receipts['real_premium']}/"
-                         f"{max(1, naive_receipts['real_total'])} real callers. Under stealth it "
-                         f"could no longer tell them apart: {r['probe_premium']}/{r['probe_total']}.",
-                  evidence={"auc_naive": round(float(auc_naive), 3),
-                            "auc_stealth": round(float(auc_stealth), 3),
-                            "quality_gap": round(gap, 4),
-                            "naive_error": round(base, 4),
-                            "stealth_error": round(base + gap, 4),
-                            "cusum_alarm_at": cus.alarm_at,
-                            "naive_premium": f"{naive_receipts['probe_premium']}/{naive_receipts['probe_total']}",
-                            "naive_real_premium": f"{naive_receipts['real_premium']}/{max(1, naive_receipts['real_total'])}",
-                            "stealth_premium": f"{r['probe_premium']}/{r['probe_total']}"})
+    em.emit("alarm", vendor_id="shady", kind="defeat_device",
+            detail=f"Under the naive exam it served its premium stack to "
+                   f"{naive_receipts['probe_premium']}/{naive_receipts['probe_total']} probes "
+                   f"while giving it to {naive_receipts['real_premium']}/"
+                   f"{max(1, naive_receipts['real_total'])} real callers. Under stealth it "
+                   f"could no longer tell them apart: {r['probe_premium']}/{r['probe_total']}.",
+            evidence={"auc_naive": round(float(auc_naive), 3),
+                      "auc_stealth": round(float(auc_stealth), 3),
+                      "quality_gap": round(gap, 4),
+                      "naive_error": round(base, 4),
+                      "stealth_error": round(base + gap, 4),
+                      "cusum_alarm_at": cus.alarm_at,
+                      "naive_premium": f"{naive_receipts['probe_premium']}/{naive_receipts['probe_total']}",
+                      "naive_real_premium": f"{naive_receipts['real_premium']}/{max(1, naive_receipts['real_total'])}",
+                      "stealth_premium": f"{r['probe_premium']}/{r['probe_total']}"})
     return race_s
 
 
@@ -416,68 +414,49 @@ def _production_sample(rng, n: int):
     return out
 
 
-# --------------------------------------------------------------------- app
+# ------------------------------------------------------------------ the run
 
-app = FastAPI()
-
-
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket):
-    await ws.accept()
-    em = Emitter(ws, f"run_{int(time.time())}")
-    state: dict = {}
+async def run_exam(need: str = DEFAULT_NEED, mode: str = "sim", sting: bool = True,
+                   budget: float = 2.0, printer=None) -> str:
+    """The full three acts. Returns the path of the run log."""
+    em = Emitter(f"run_{int(time.time())}", printer)
     try:
-        while True:
-            msg = json.loads(await ws.receive_text())
-            cmd = msg.get("cmd")
-            if cmd == "start":
-                need = msg.get("need") or DEFAULT_NEED
-                mode = msg.get("mode", "sim")
-                fleet = list(FLEET)
-                if mode == "live":
-                    key = vapi_mod.load_key()
-                    if key:
-                        LIVE["client"] = vapi_mod.VapiClient(key)
-                        LIVE["ids"] = set(vapi_mod.VENDOR_TRANSCRIBERS)
-                        LIVE["sem"] = asyncio.Semaphore(8)
-                        try:
-                            await LIVE["client"].ensure_assistant()
-                            fleet = [v for v in FLEET if v.id in LIVE["ids"]]
-                        except Exception:
-                            mode = "sim"
-                    else:
-                        mode = "sim"
-                state["fleet"] = fleet
-                await em.emit("mode", mode=mode,
-                              vendors=[v.id for v in fleet],
-                              live_vendors=sorted(LIVE["ids"]) if mode == "live" else [])
-                plan = await act_compile(em, need)
-                state["plan"] = plan
-                if mode == "live":
-                    healthy, why = await preflight(em, plan)
-                    if not healthy:
-                        mode = "sim"
-                        fleet = list(FLEET)
-                        await em.emit("mode", mode="sim", degraded=True, reason=why,
-                                      vendors=[v.id for v in fleet], live_vendors=[])
-                await em.emit("phase", phase="race", title="The race",
-                              subtitle="Spend only where the leaders still overlap")
-                probes = await synthesize(em, plan)
-                race, done, saved = await act_race(em, plan, probes, fleet, mode)
-                await em.emit("phase", phase="verdict", title="Decision", subtitle="")
-                await em.emit("verdict", **memo(plan, race, len(race.probes_run), saved, mode),
-                              elapsed_s=round(time.time() - em.t0, 1))
-            elif cmd == "act3":
-                plan = state.get("plan") or FALLBACK
-                await act_sting(em, plan, msg.get("mode", "sim"))
-            elif cmd == "ping":
-                await em.emit("pong")
-    except WebSocketDisconnect:
-        pass
+        fleet = fresh_fleet()
+        if mode == "live":
+            key = vapi_mod.load_key()
+            if key:
+                LIVE["client"] = vapi_mod.VapiClient(key)
+                LIVE["ids"] = set(vapi_mod.VENDOR_TRANSCRIBERS)
+                LIVE["sem"] = asyncio.Semaphore(8)
+                try:
+                    await LIVE["client"].ensure_assistant()
+                    fleet = [v for v in fresh_fleet() if v.id in LIVE["ids"]]
+                except Exception:
+                    mode = "sim"
+            else:
+                mode = "sim"
+        em.emit("mode", mode=mode, vendors=[v.id for v in fleet],
+                live_vendors=sorted(LIVE["ids"]) if mode == "live" else [])
+
+        plan = await act_compile(em, need)
+        if mode == "live":
+            healthy, why = await preflight(em, plan)
+            if not healthy:
+                mode = "sim"
+                fleet = fresh_fleet()
+                em.emit("mode", mode="sim", degraded=True, reason=why,
+                        vendors=[v.id for v in fleet], live_vendors=[])
+
+        em.emit("phase", phase="race", title="The race",
+                subtitle="Spend only where the leaders still overlap")
+        probes = await synthesize(em, plan)
+        race, done, saved = await act_race(em, plan, probes, fleet, mode, budget=budget)
+        em.emit("phase", phase="verdict", title="Decision", subtitle="")
+        em.emit("verdict", **memo(plan, race, len(race.probes_run), saved, mode),
+                elapsed_s=round(time.time() - em.t0, 1))
+
+        if sting:
+            await act_sting(em, plan, mode)
+        return em.path
     finally:
         em.close()
-
-
-app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
-app.mount("/runs", StaticFiles(directory=RUNS), name="runs")
-app.mount("/", StaticFiles(directory=UI, html=True), name="ui")

@@ -10,7 +10,7 @@
 | `papers/2606.06462` | **Benchmark Agent** ("Benchmark Everything Everywhere All at Once", CUHK, NeurIPS'26 sub) | Agentic benchmark factory: Planner (Design→Grounding→Allocation over dataset pool) + Executor (TTS, noise mixing, STT, OCR, image degradation, web search) + verification loops | High (your anchor paper; code is real) |
 | `code/Benchmark-Agent` | Its code | 59 py files, 6-stage pipeline, XTTS/pydub/TUT-noise tools, caching. Real system, ~8.5/10 maturity | — |
 | `papers/2407.08351` + `code/AutoBencher` | **AutoBencher** (Stanford, ICLR 2025) | Declarative desiderata as optimization: salience constraint + difficulty (1−max acc) + **separability (MAD of model accs)** + novelty (1−rank-corr). Privileged-info oracles (retrieval / sympy / translator). ~$15–45/run | High |
-| `papers/2605.12673` | **BenchJack** (Berkeley RDI — Dawn Song et al.) | Auditing agent that *exploits* benchmarks: 10/10 audited, 9/10 near-perfect w/o solving anything; 219 flaws in 8 classes (V1–V8). Defender loop cuts hackability to <10% | High |
+| `papers/2605.12673` | **Benchmark Audit** (Berkeley RDI — Dawn Song et al.) | Auditing agent that *exploits* benchmarks: 10/10 audited, 9/10 near-perfect w/o solving anything; 219 flaws in 8 classes (V1–V8). Defender loop cuts exploitability to <10% | High |
 | `papers/2507.02825` | **ABC checklist** (UIUC+Stanford+Berkeley+UK AISI…, NeurIPS 2025) | Task-validity / outcome-validity / reporting checklist. τ-bench do-nothing agent = 38%; 24% of SWE-bench-Verified top-50 leaderboard positions wrong | High |
 | `papers/2504.20879` | **The Leaderboard Illusion** (Cohere+) | Arena gaming mechanics: Meta's 27 private variants, selective retraction, best-of-N ⇒ ~+100 Elo illusion; 62.8% of Arena data to 4 providers; Arena-data SFT ⇒ +112% relative win-rate, MMLU down | High |
 | `papers/2508.01780` + `code/LiveMCPBench` | **LiveMCPBench** (ICIP-CAS) | 95 *manual* tasks over 70 MCP servers; LLM-judge (81% human agreement). Evaluates **agents**, not servers | Medium-high |
@@ -59,9 +59,9 @@ Scoring lens: novelty/insight 35%, demo-wow 30%, weekend feasibility 20%, produc
 
 **#2 — Stealth auditor standalone ("Dieselgate detector for AI APIs").** Continuous canary probing + MMD/CUSUM substitution detection, demoed on reproduced quantization/nerf scenarios. Sharpest pure-research demo; weaker "useful today" story; and accusing real vendors live is irresponsible while synthetic targets alone feel thin without the buying context. Folded into #1 as Act 3 it's strictly better.
 
-**#3 — Pure Vet (no sting).** The safe version. Still beats most hackathon fare on usefulness + theater (playable failure audio is gold). Keep as fallback.
+**#3 — Pure Vet (no sting).** The safe version. Still beats most demo-project fare on usefulness + theater (playable failure audio is gold). Keep as fallback.
 
-**#4 — MCP server certifier.** I disagree with "best product wedge" as a *demo* choice. MCPEval (Salesforce, shipping code) already does schema→task-gen→execution-grounded eval; what's left (robustness/safety probes, per-server report card, cross-server comparison, signed cards, registry distribution) is real but extension-shaped — "MCPEval + mcp-scan + a directory." Demo output is JSON, not a moment. The wedge is real as a *company*; it's the wrong *hackathon bet* against a "no cookie-cutter" bar.
+**#4 — MCP server certifier.** I disagree with "best product wedge" as a *demo* choice. MCPEval (Salesforce, shipping code) already does schema→task-gen→execution-grounded eval; what's left (robustness/safety probes, per-server report card, cross-server comparison, signed cards, registry distribution) is real but extension-shaped — "MCPEval + mcp-scan + a directory." Demo output is JSON, not a moment. The wedge is real as a *company*; it's the wrong *demo-day bet* against a "no cookie-cutter" bar.
 
 **#5 — Exam-as-escrow protocol** (commit exam hash; vendor passes → x402 releases payment; commit-reveal prevents overfitting). Genuinely novel mechanism-design garnish — one coda slide, not the build.
 

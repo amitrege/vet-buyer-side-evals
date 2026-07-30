@@ -1,6 +1,1033 @@
-<!doctype html><meta charset="utf-8">
-<title>Vet — a pre-flight check for agents that spend money</title>
-<meta http-equiv="refresh" content="0; url=vet/ui/pitch.html">
-<link rel="canonical" href="vet/ui/pitch.html">
-<body style="background:#0d0d0d;color:#eee;font:16px/1.6 system-ui;padding:3rem">
-<p>Opening the demo… <a href="vet/ui/pitch.html" style="color:#9085e9">click here if it doesn't</a>.</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vet: a pre-flight check for agents that spend money</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23ffc247'/%3E%3C/svg%3E">
+<style>
+/* ============================================================
+   VET — the demo deck. Single file. No dependencies. No network.
+   ============================================================ */
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;overflow:hidden;background:#050607;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+:root{
+  --bg:#06070a;
+  --panel:rgba(255,255,255,.028);
+  --panel-2:rgba(255,255,255,.05);
+  --line:rgba(255,255,255,.10);
+  --line-soft:rgba(255,255,255,.06);
+  --ink:#f3f6f9;
+  --dim:#98a3b0;
+  --dimmer:#5d6773;
+  --amber:#ffc247;
+  --amber-soft:rgba(255,194,71,.14);
+  --green:#3fe38f;
+  --green-soft:rgba(63,227,143,.13);
+  --red:#ff5566;
+  --red-soft:rgba(255,85,102,.13);
+  --blue:#7cc7ff;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Inter,Segoe UI,system-ui,sans-serif;
+  --pad:clamp(26px,4.6vw,84px);
+  --ease:cubic-bezier(.16,1,.3,1);
+}
+
+body{font-family:var(--sans);color:var(--ink)}
+
+/* ---------- stage + background ---------- */
+.stage{position:fixed;inset:0;overflow:hidden;cursor:default}
+.bg{position:absolute;inset:0;z-index:0;pointer-events:none;background:
+  radial-gradient(1100px 780px at 78% -12%, rgba(255,194,71,.11), transparent 62%),
+  radial-gradient(900px 700px at 8% 108%, rgba(124,199,255,.09), transparent 60%),
+  radial-gradient(1400px 900px at 50% 50%, #0b0d12 0%, #06070a 70%, #030405 100%);
+}
+.bg::after{content:"";position:absolute;inset:0;opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);
+  background-size:74px 74px;
+  -webkit-mask-image:radial-gradient(1200px 800px at 50% 45%,#000 10%,transparent 82%);
+  mask-image:radial-gradient(1200px 800px at 50% 45%,#000 10%,transparent 82%);
+}
+.vig{position:absolute;inset:0;z-index:6;pointer-events:none;
+  box-shadow:inset 0 0 240px 60px rgba(0,0,0,.72)}
+
+/* ---------- chrome ---------- */
+.chrome{position:absolute;z-index:5;top:0;left:0;right:0;display:flex;justify-content:space-between;
+  align-items:center;padding:clamp(18px,2.4vw,34px) var(--pad);pointer-events:none;
+  font-family:var(--mono);font-size:clamp(10px,.78vw,13px);letter-spacing:.32em;text-transform:uppercase}
+.mark{display:flex;align-items:center;gap:10px;color:var(--ink);font-weight:600}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 0 rgba(255,194,71,.5);
+  animation:pulse 2.6s var(--ease) infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,194,71,.45)}70%{box-shadow:0 0 0 12px rgba(255,194,71,0)}100%{box-shadow:0 0 0 0 rgba(255,194,71,0)}}
+.counter{color:var(--dimmer);font-variant-numeric:tabular-nums}
+.counter b{color:var(--dim);font-weight:600}
+
+/* ---------- slides ---------- */
+#deck{position:absolute;inset:0;z-index:2}
+.slide{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;
+  padding:clamp(84px,10vh,140px) var(--pad) clamp(84px,10vh,120px);
+  opacity:0;visibility:hidden;pointer-events:none;transition:opacity .5s var(--ease),visibility .5s}
+.slide.is-active{opacity:1;visibility:visible;pointer-events:auto}
+.inner{width:100%;max-width:1480px;margin:0 auto}
+
+/* entrance animation */
+.an{opacity:0;transform:translateY(20px);filter:blur(6px);
+  transition:opacity .8s var(--ease),transform .9s var(--ease),filter .8s var(--ease);
+  transition-delay:var(--d,0s)}
+.slide.is-active .an{opacity:1;transform:none;filter:blur(0)}
+.slide:not(.is-active) .an{transition-duration:.22s;transition-delay:0s}
+
+/* ---------- beats: reveal one idea at a time inside a slide ----------
+   An element with data-b="2" (or "3") stays invisible until the slide's beat
+   reaches that number. Carriers are plain wrapper divs, so the height:0 trick
+   never fights a border or padding. */
+[data-b]{opacity:0;transform:translateY(16px);height:0;overflow:hidden;margin:0;
+  pointer-events:none;transition:opacity .7s var(--ease),transform .7s var(--ease)}
+.slide[data-beat="2"] [data-b="2"],
+.slide[data-beat="3"] [data-b="2"],
+.slide[data-beat="3"] [data-b="3"]{opacity:1;transform:none;height:auto;overflow:visible;pointer-events:auto}
+/* …and earlier beats step back so the new idea owns the eye */
+[data-dim-at]{transition:opacity .6s ease,filter .6s ease}
+.slide[data-beat="2"] [data-dim-at="2"],
+.slide[data-beat="3"] [data-dim-at="2"],
+.slide[data-beat="3"] [data-dim-at="3"]{opacity:.30;filter:saturate(.35)}
+
+/* ---------- type ---------- */
+.kicker{font-family:var(--mono);font-size:clamp(10px,.82vw,13px);letter-spacing:.34em;text-transform:uppercase;
+  color:var(--amber);display:flex;align-items:center;gap:14px;margin-bottom:clamp(18px,2.6vh,34px)}
+.kicker::after{content:"";height:1px;flex:1;max-width:180px;
+  background:linear-gradient(90deg,rgba(255,194,71,.45),transparent)}
+h1{margin:0;font-size:clamp(2.15rem,min(5.3vw,8.6vh),5.4rem);line-height:1.03;letter-spacing:-.035em;font-weight:650;
+  max-width:20ch;text-wrap:balance}
+h1 em{font-style:normal;color:var(--amber)}
+.sub{margin:clamp(18px,2.4vh,30px) 0 0;font-size:clamp(1.02rem,1.62vw,1.72rem);line-height:1.42;color:var(--dim);
+  max-width:46ch;font-weight:400;text-wrap:pretty}
+.sub strong{color:var(--ink);font-weight:600}
+.cap{margin-top:clamp(16px,2.2vh,28px);font-family:var(--mono);font-size:clamp(12px,.98vw,16px);
+  letter-spacing:.06em;color:var(--dim);line-height:1.6}
+
+/* dense slides: more content, so the type steps down a notch (still huge) */
+.slide.dense{padding-top:clamp(66px,8vh,112px);padding-bottom:clamp(66px,8vh,104px)}
+.dense h1{font-size:clamp(1.75rem,min(3.95vw,6.3vh),4rem);max-width:27ch;letter-spacing:-.03em}
+.dense .sub{font-size:clamp(.95rem,min(1.34vw,2.1vh),1.4rem);max-width:66ch;
+  margin-top:clamp(14px,1.9vh,24px)}
+
+/* ---------- slide 1 ---------- */
+.s1 h1{font-size:clamp(2.6rem,min(7.1vw,12vh),7.2rem);max-width:15ch;font-weight:680}
+.s1 .sub{font-size:clamp(1.1rem,min(1.9vw,3vh),2.05rem);max-width:40ch}
+.hint{position:absolute;left:50%;bottom:clamp(76px,9vh,112px);transform:translateX(-50%);z-index:5;
+  font-family:var(--mono);font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--dimmer);
+  display:flex;align-items:center;gap:10px;opacity:0;transition:opacity .7s ease;pointer-events:none}
+.hint.show{opacity:1}
+.hint kbd{font:inherit;border:1px solid var(--line);border-radius:5px;padding:5px 12px;color:var(--dim);
+  background:rgba(255,255,255,.04);animation:breathe 2.8s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
+
+/* ---------- generic bits ---------- */
+.tag{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:clamp(9px,.72vw,12px);
+  letter-spacing:.26em;text-transform:uppercase;color:var(--dimmer);
+  border:1px solid var(--line);border-radius:999px;padding:6px 13px}
+
+/* ---------- stat tiles (slides 2–3) ---------- */
+.lb{display:flex;gap:clamp(22px,3vw,54px);align-items:flex-end;margin-top:clamp(24px,4vh,46px);flex-wrap:wrap}
+.lb .stat{flex:1 1 190px;min-width:150px;padding:clamp(16px,2vw,26px) clamp(16px,2vw,28px);border-radius:14px;
+  border:1px solid var(--line);background:var(--panel)}
+.lb .stat b{display:block;font-size:clamp(2rem,3.7vw,3.9rem);font-weight:640;letter-spacing:-.04em;line-height:1;
+  font-variant-numeric:tabular-nums}
+.lb .stat span{display:block;margin-top:10px;font-family:var(--mono);font-size:clamp(10px,.78vw,12.5px);
+  letter-spacing:.2em;text-transform:uppercase;color:var(--dimmer);line-height:1.5}
+.lb .stat.hot b{color:var(--amber)}
+.lb .stat.cold b{color:var(--red)}
+
+/* ---------- slide 4 : the buyer ---------- */
+.quote{position:relative;margin-top:clamp(22px,3.6vh,44px);padding:clamp(26px,3.4vw,46px) clamp(26px,3.6vw,52px);
+  border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015));
+  max-width:1180px;overflow:hidden}
+.quote::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--amber),rgba(255,194,71,.05))}
+.blist{margin:clamp(16px,2.4vh,26px) 0 0;padding:0;list-style:none;display:flex;flex-direction:column;
+  gap:clamp(12px,1.9vh,22px)}
+.blist li{position:relative;padding-left:36px;font-size:clamp(1.05rem,min(1.9vw,3.1vh),2.05rem);line-height:1.3;
+  color:#e9edf2;letter-spacing:-.015em;font-weight:440}
+.blist li::before{content:"";position:absolute;left:8px;top:.56em;width:9px;height:9px;border-radius:2px;
+  background:var(--amber);transform:rotate(45deg)}
+.blist li mark{background:var(--amber-soft);color:var(--amber);border-radius:4px;padding:.04em .22em}
+.blist li b{color:var(--ink);font-weight:600}
+.blist.sm{gap:clamp(9px,1.4vh,16px)}
+.blist.sm li{font-size:clamp(.95rem,min(1.3vw,2.1vh),1.42rem);padding-left:30px}
+.blist.sm li::before{width:7px;height:7px;left:6px}
+
+/* ---------- slide 5 : criteria ---------- */
+.crit{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(14px,1.5vw,22px);
+  margin-top:clamp(22px,3.4vh,40px)}
+.crit .c{padding:clamp(18px,1.9vw,28px) clamp(18px,2vw,30px);border-radius:15px;border:1px solid var(--line);
+  background:var(--panel);position:relative;overflow:hidden}
+.crit .c .top{display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+.crit .c h3{margin:0;font-size:clamp(1.02rem,1.52vw,1.62rem);font-weight:600;letter-spacing:-.02em;line-height:1.22}
+.crit .c .w{font-family:var(--mono);font-size:clamp(1.1rem,1.72vw,1.9rem);font-weight:600;color:var(--amber);
+  font-variant-numeric:tabular-nums;letter-spacing:-.03em;flex:0 0 auto}
+.crit .c p{margin:10px 0 0;font-size:clamp(.85rem,1.02vw,1.06rem);line-height:1.5;color:var(--dim);max-width:46ch}
+.bar{height:4px;border-radius:99px;background:rgba(255,255,255,.07);margin-top:16px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;border-radius:99px;
+  background:linear-gradient(90deg,rgba(255,194,71,.55),var(--amber));
+  transition:width 1.05s var(--ease);transition-delay:calc(var(--d,0s) + .25s)}
+.slide.is-active .bar i{width:var(--w,50%)}
+
+/* ---------- slide 6 : the probe ---------- */
+.probe{margin-top:clamp(18px,2.8vh,34px);padding:clamp(24px,3vw,42px);border-radius:20px;border:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012))}
+.script{font-size:clamp(1.12rem,min(2.28vw,3.7vh),2.5rem);line-height:1.46;letter-spacing:-.018em;font-weight:450;color:#eaeff4;
+  text-wrap:pretty}
+.script .f{position:relative;display:inline-block;padding:.04em .3em;border-radius:6px;color:var(--amber);
+  background:var(--amber-soft);box-shadow:inset 0 0 0 1px rgba(255,194,71,.3)}
+.script .f.g{color:var(--green);background:var(--green-soft);box-shadow:inset 0 0 0 1px rgba(63,227,143,.3)}
+.script .es{color:var(--blue);font-style:italic}
+.playrow{display:flex;align-items:center;gap:clamp(18px,2.4vw,34px);margin-top:clamp(22px,3vh,34px);flex-wrap:wrap}
+.play{display:flex;align-items:center;gap:16px;padding:0;border:0;background:none;cursor:pointer;
+  font-family:var(--sans);color:var(--ink);-webkit-tap-highlight-color:transparent}
+.play .disc{position:relative;width:clamp(66px,7vw,92px);height:clamp(66px,7vw,92px);border-radius:50%;flex:0 0 auto;
+  display:grid;place-items:center;background:linear-gradient(180deg,#ffd479,var(--amber));
+  box-shadow:0 14px 44px rgba(255,194,71,.28),0 0 0 1px rgba(255,255,255,.16) inset;transition:transform .3s var(--ease)}
+.play:hover .disc{transform:scale(1.05)}
+.play:active .disc{transform:scale(.97)}
+.play .disc::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:1px solid rgba(255,194,71,.4);
+  animation:halo 2.4s var(--ease) infinite}
+@keyframes halo{0%{transform:scale(1);opacity:.7}100%{transform:scale(1.35);opacity:0}}
+.play .disc svg{width:38%;height:38%;fill:#1a1204;margin-left:8%}
+.play .lbl{text-align:left}
+.play .lbl b{display:block;font-size:clamp(1.02rem,1.35vw,1.5rem);font-weight:600;letter-spacing:-.02em}
+.play .lbl span{display:block;margin-top:5px;font-family:var(--mono);font-size:clamp(10px,.8vw,12.5px);
+  letter-spacing:.2em;text-transform:uppercase;color:var(--dimmer)}
+.wave{display:flex;align-items:center;gap:clamp(3px,.42vw,6px);height:clamp(40px,4.6vw,62px);flex:1 1 240px;min-width:180px}
+.wave i{flex:1;min-width:2px;max-width:7px;border-radius:99px;background:rgba(255,255,255,.16);
+  height:22%;transform-origin:center;transition:background .3s ease}
+.playing .wave i{background:linear-gradient(180deg,var(--amber),rgba(255,194,71,.35));
+  animation:wv 1.05s ease-in-out infinite alternate}
+@keyframes wv{from{height:14%}to{height:100%}}
+.audiobar{height:3px;border-radius:99px;background:rgba(255,255,255,.09);margin-top:18px;overflow:hidden;max-width:100%}
+.audiobar i{display:block;height:100%;width:0;background:var(--amber);border-radius:99px;transition:width .18s linear}
+
+/* ---------- slide 7 : provenance flow ---------- */
+.flow{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch;gap:clamp(10px,1.4vw,22px);
+  margin-top:clamp(24px,3.8vh,46px)}
+.step{padding:clamp(18px,2.1vw,30px);border-radius:16px;border:1px solid var(--line);background:var(--panel);
+  display:flex;flex-direction:column;justify-content:space-between;min-height:clamp(150px,20vh,230px)}
+.step .n{font-family:var(--mono);font-size:clamp(9px,.74vw,12px);letter-spacing:.28em;text-transform:uppercase;color:var(--dimmer)}
+.step .v{margin-top:16px;font-size:clamp(1.02rem,1.62vw,1.78rem);line-height:1.32;letter-spacing:-.02em;font-weight:520}
+.step .v.mono{font-family:var(--mono);letter-spacing:-.01em}
+.step.key{border-color:rgba(63,227,143,.4);background:linear-gradient(180deg,rgba(63,227,143,.09),rgba(63,227,143,.02))}
+.step.key .v{color:var(--green)}
+.step.key .n{color:rgba(63,227,143,.75)}
+.step .foot{margin-top:14px;font-size:clamp(.8rem,.95vw,1rem);color:var(--dimmer);line-height:1.45}
+.arrow{display:grid;place-items:center;color:var(--dimmer)}
+.arrow svg{width:clamp(24px,2.4vw,40px);height:auto}
+.arrow svg path{stroke:currentColor;stroke-width:1.4;fill:none}
+
+/* ---------- slide 8 : transcripts ---------- */
+.ans{display:flex;align-items:center;gap:clamp(8px,1vw,14px);margin-top:clamp(14px,2vh,24px);flex-wrap:wrap}
+.ans .a{font-family:var(--mono);font-size:clamp(10px,.86vw,13.5px);letter-spacing:.06em;color:var(--amber);
+  border:1px solid rgba(255,194,71,.34);background:var(--amber-soft);border-radius:8px;padding:7px 12px}
+.ans .a.g{color:var(--green);border-color:rgba(63,227,143,.34);background:var(--green-soft)}
+.ans .albl{font-family:var(--mono);font-size:clamp(9px,.72vw,11.5px);letter-spacing:.24em;text-transform:uppercase;
+  color:var(--dimmer)}
+.tr{margin-top:clamp(14px,2vh,26px);display:flex;flex-direction:column;gap:clamp(8px,1vw,13px)}
+.row{display:grid;grid-template-columns:minmax(160px,15%) 1fr minmax(150px,17%);gap:clamp(14px,1.8vw,30px);
+  align-items:center;padding:clamp(11px,1.35vh,19px) clamp(15px,1.7vw,24px);border-radius:13px;
+  border:1px solid var(--line-soft);background:var(--panel)}
+.row.win{border-color:rgba(63,227,143,.42);background:linear-gradient(90deg,rgba(63,227,143,.075),rgba(255,255,255,.02))}
+.row .vend{font-family:var(--mono);font-size:clamp(11px,.94vw,15px);letter-spacing:.02em;color:var(--dim);line-height:1.35}
+.row.win .vend{color:var(--green)}
+.row .txt{font-size:clamp(.92rem,min(1.28vw,2.05vh),1.42rem);line-height:1.42;color:#dde3ea;letter-spacing:-.01em}
+.row .txt .e{color:var(--red);background:var(--red-soft);border-radius:4px;padding:.02em .2em;
+  text-decoration:underline;text-decoration-color:rgba(255,85,102,.5);text-underline-offset:3px;text-decoration-thickness:1px}
+.row .txt .k{color:var(--green);background:var(--green-soft);border-radius:4px;padding:.02em .22em;font-weight:600}
+.row .verdict{font-family:var(--mono);font-size:clamp(9.5px,.8vw,12.5px);letter-spacing:.12em;text-transform:uppercase;
+  color:var(--red);line-height:1.5;text-align:right}
+.row.win .verdict{color:var(--green)}
+.tr [data-b] .row{margin-top:0}
+.punch{margin-top:clamp(14px,2.2vh,26px);font-size:clamp(1rem,min(1.55vw,2.5vh),1.68rem);line-height:1.4;letter-spacing:-.02em;
+  color:var(--ink);font-weight:520;max-width:52ch}
+.punch em{font-style:normal;color:var(--amber)}
+
+/* ---------- A/B listen buttons (slides 8–9) ---------- */
+.ab{display:flex;align-items:center;gap:.7rem;margin:.7rem 0 0;padding:.55rem .9rem .55rem .6rem;
+  background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.14);border-radius:999px;
+  color:inherit;font:inherit;cursor:pointer;text-align:left;
+  transition:background .25s var(--ease),border-color .25s var(--ease),transform .25s var(--ease)}
+.ab:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.3);transform:translateY(-1px)}
+.ab .abd{flex:0 0 auto;width:2rem;height:2rem;border-radius:50%;display:grid;place-items:center;
+  background:var(--amber);color:#111;font-size:.8rem;line-height:1}
+.ab.on .abd{background:var(--green);animation:abp 1.1s ease-in-out infinite}
+@keyframes abp{50%{transform:scale(1.08)}}
+.ab .abt{display:flex;flex-direction:column;line-height:1.25}
+.ab .abt b{font-size:.95rem;font-weight:650}
+.ab .abt i{font-style:normal;opacity:.6;font-size:.78rem}
+.ab.mini{margin:0;padding:.4rem .8rem .4rem .5rem}
+.ab.mini .abd{width:1.6rem;height:1.6rem;font-size:.66rem}
+.ab.mini .abt b{font-size:.82rem}
+
+/* ---------- slide 9 : defeat device ---------- */
+.sting{display:grid;grid-template-columns:minmax(260px,34%) 1fr;gap:clamp(22px,3.2vw,54px);
+  align-items:start;margin-top:clamp(18px,2.6vh,34px)}
+.gauge{position:relative;text-align:center}
+.gauge svg{width:100%;max-width:340px;display:block;margin:0 auto;overflow:visible}
+.gauge .track{fill:none;stroke:rgba(255,255,255,.09);stroke-width:13;stroke-linecap:round}
+.gauge .val{fill:none;stroke:var(--red);stroke-width:13;stroke-linecap:round;
+  stroke-dasharray:var(--len,251);stroke-dashoffset:var(--off,0);
+  transition:stroke-dashoffset 1.1s var(--ease),stroke 1.1s ease,filter 1.1s ease;
+  filter:drop-shadow(0 0 12px rgba(255,85,102,.45))}
+.gauge .needle{stroke:var(--ink);stroke-width:2.5;stroke-linecap:round;transform-origin:125px 110px;
+  transition:transform 1.1s var(--ease)}
+.gauge .read{margin-top:-6px;font-size:clamp(2rem,3.6vw,3.7rem);font-weight:660;letter-spacing:-.04em;
+  font-variant-numeric:tabular-nums;color:var(--red);transition:color .8s ease}
+.gauge .glbl{margin-top:8px;font-family:var(--mono);font-size:clamp(9.5px,.76vw,12px);letter-spacing:.22em;
+  text-transform:uppercase;color:var(--dimmer);line-height:1.6;max-width:26ch;margin-left:auto;margin-right:auto}
+.sting .say{font-size:clamp(1rem,min(1.55vw,2.5vh),1.72rem);line-height:1.42;letter-spacing:-.02em;color:#e6ebf1;
+  max-width:38ch;font-weight:450;margin:0}
+.sting .say .hi{color:var(--amber)}
+.sting .say b{color:var(--ink)}
+.gapline{margin-top:clamp(14px,2vh,22px)}
+.err-jump{display:flex;align-items:center;gap:clamp(12px,1.6vw,26px);margin-top:clamp(14px,2vh,22px);flex-wrap:wrap}
+.err-jump .pill{padding:12px 20px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
+  font-family:var(--mono);font-variant-numeric:tabular-nums}
+.err-jump .pill b{display:block;font-size:clamp(1.2rem,2.1vw,2.2rem);font-weight:640;letter-spacing:-.03em}
+.err-jump .pill span{display:block;margin-top:6px;font-size:clamp(9px,.72vw,11.5px);letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dimmer)}
+.err-jump .pill.a b{color:var(--dim)}
+.err-jump .pill.b b{color:var(--red)}
+.err-jump .to{color:var(--dimmer);font-family:var(--mono)}
+/* ---------- close ---------- */
+.verdictcard{margin-top:clamp(16px,2.4vh,30px);padding:clamp(26px,3.4vw,52px);border-radius:22px;
+  border:1px solid rgba(63,227,143,.34);background:linear-gradient(180deg,rgba(63,227,143,.09),rgba(255,255,255,.015));
+  max-width:1120px}
+.verdictcard .who{margin:14px 0 0;font-size:clamp(2rem,5vw,5.1rem);line-height:1.02;letter-spacing:-.04em;font-weight:660}
+.verdictcard .nums{margin-top:clamp(14px,2vh,24px);font-family:var(--mono);font-size:clamp(1rem,1.62vw,1.78rem);
+  color:var(--green);letter-spacing:-.005em;font-variant-numeric:tabular-nums}
+.verdictcard .flip{margin-top:clamp(10px,1.5vh,18px);font-family:var(--mono);font-size:clamp(.82rem,1.05vw,1.15rem);
+  color:var(--dim);letter-spacing:.02em}
+.verdictcard .flip b{color:var(--red);font-weight:640}
+.verdictcard .cost{margin-top:clamp(14px,2vh,22px);font-size:clamp(1.02rem,1.72vw,1.92rem);color:var(--ink);font-weight:520;
+  letter-spacing:-.02em}
+.verdictcard .cost b{color:var(--amber);font-weight:660}
+.signoff{margin-top:clamp(20px,3vh,36px);font-family:var(--mono);font-size:clamp(11px,.92vw,14.5px);
+  letter-spacing:.22em;text-transform:uppercase;color:var(--dimmer)}
+.signoff b{color:var(--dim);font-weight:600}
+
+/* ---------- dots ---------- */
+.dots{position:absolute;z-index:5;left:0;right:0;bottom:clamp(22px,3vh,40px);display:flex;justify-content:center;
+  align-items:center;gap:clamp(8px,.9vw,13px)}
+.dots button{width:26px;height:26px;padding:0;border:0;background:none;cursor:pointer;display:grid;place-items:center;
+  -webkit-tap-highlight-color:transparent}
+.dots button i{display:block;width:7px;height:7px;border-radius:99px;background:rgba(255,255,255,.19);
+  transition:all .45s var(--ease)}
+.dots button:hover i{background:rgba(255,255,255,.42)}
+.dots button.on i{width:30px;background:var(--amber);box-shadow:0 0 14px rgba(255,194,71,.5)}
+.dots button.done i{background:rgba(255,194,71,.42)}
+
+@media (max-width:900px){
+  .crit{grid-template-columns:1fr}
+  .flow{grid-template-columns:1fr;}
+  .arrow{transform:rotate(90deg);padding:2px 0}
+  .row{grid-template-columns:1fr;gap:8px}
+  .row .verdict{text-align:left}
+  .sting{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  .an{transition-duration:.01ms!important;filter:none}
+  .pulse,.play .disc::after{animation:none}
+}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="bg"></div>
+
+  <header class="chrome">
+    <div class="mark"><span class="pulse"></span>Vet</div>
+    <div class="counter"><b id="cnum">01</b> / <span id="ctot">10</span></div>
+  </header>
+
+  <main id="deck">
+
+    <!-- ================= S1 · the hook ================= -->
+    <section class="slide s1" data-k="s1">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">The shift</div>
+        <h1 class="an" style="--d:.15s">Soon your AI agent will do the <em>buying</em>.</h1>
+        <p class="sub an" style="--d:.42s">It will choose which services to buy, and from whom.</p>
+      </div>
+    </section>
+
+    <!-- ================= S2 · the problem ================= -->
+    <section class="slide" data-k="s2">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">The problem</div>
+        <h1 class="an" style="--d:.14s">How will it <em>pick</em> a vendor?</h1>
+        <ul class="blist" style="margin-top:clamp(26px,4vh,48px)">
+          <li class="an" style="--d:.45s">Today, it would go by <b>public benchmarks</b></li>
+          <li class="an" style="--d:.6s">One score, averaged over everyone's use cases</li>
+          <li class="an" style="--d:.75s">Not built for yours</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ================= S3 · why that breaks ================= -->
+    <section class="slide" data-k="s3">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">Why that breaks</div>
+        <h1 class="an" style="--d:.14s">Public benchmarks can be <em>gamed</em>.</h1>
+        <div class="lb">
+          <div class="stat an" style="--d:.44s"><b>9</b><span>major AI benchmarks</span></div>
+          <div class="stat hot an" style="--d:.56s"><b>~100%</b><span>scores achieved</span></div>
+          <div class="stat cold an" style="--d:.68s"><b>0</b><span>tasks actually solved</span></div>
+        </div>
+        <p class="cap an" style="--d:.86s">a berkeley research team, 2026: they beat the scoreboards, not the tasks<br>once a score is public, sellers optimize for the score</p>
+      </div>
+    </section>
+
+    <!-- ================= S4 · the idea ================= -->
+    <section class="slide dense" data-k="s4">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">The idea</div>
+        <h1 class="an" style="--d:.14s">So: a <em>private exam</em>, built for one buyer.</h1>
+        <p class="sub an" style="--d:.28s">We create a bespoke benchmark, on the fly, for your needs.</p>
+        <div class="quote an" style="--d:.4s">
+          <span class="tag">This buyer's needs</span>
+          <ul class="blist">
+            <li class="an" style="--d:.55s">Buying: <b>transcription</b> (phone calls to text) for urgent-care clinics in Houston</li>
+            <li class="an" style="--d:.67s">After-hours callers switch <mark>Spanish ↔ English</mark> mid-sentence</li>
+            <li class="an" style="--d:.79s">Cell phones · noisy waiting rooms</li>
+            <li class="an" style="--d:.91s"><b>Drug names + callback numbers</b> must be right. Staff dial them back</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= S5 · what matters ================= -->
+    <section class="slide dense" data-k="s5">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">Step 1 · what matters</div>
+        <h1 class="an" style="--d:.13s">What does this buyer actually <em>need</em>?</h1>
+        <p class="sub an" style="--d:.3s">An AI drafts these criteria from the request, or you write your own. They set what to test, and how much each mistake counts.</p>
+        <div class="crit">
+          <div class="c an" style="--d:.46s">
+            <div class="top"><h3>Callback numbers on a bad line</h3><div class="w">30%</div></div>
+            <p>one wrong digit → a stranger gets the 2 a.m. call</p>
+            <div class="bar"><i style="--w:96%;--d:.46s"></i></div>
+          </div>
+          <div class="c an" style="--d:.6s">
+            <div class="top"><h3>Drug names, mid-sentence in Spanish</h3><div class="w">25%</div></div>
+            <p>a wrong drug lands on a medical chart</p>
+            <div class="bar"><i style="--w:80%;--d:.6s"></i></div>
+          </div>
+          <div class="c an" style="--d:.74s">
+            <div class="top"><h3>Callers who correct their number</h3><div class="w">25%</div></div>
+            <p>it must keep the fix, not the first try</p>
+            <div class="bar"><i style="--w:80%;--d:.74s"></i></div>
+          </div>
+          <div class="c an" style="--d:.88s">
+            <div class="top"><h3>The easy case, as a baseline</h3><div class="w">20%</div></div>
+            <p>fails even in a quiet room → stop paying today</p>
+            <div class="bar"><i style="--w:64%;--d:.88s"></i></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= S6 · the test ================= -->
+    <section class="slide dense" data-k="s6">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">Step 2 · the test</div>
+        <h1 class="an" style="--d:.13s">The criteria become <em>test calls</em>.</h1>
+        <p class="sub an" style="--d:.3s">This clinic serves many low-income, Spanish-speaking patients. The test calls must sound like their calls.<br>Here is one of the 38:</p>
+        <div class="probe an" style="--d:.42s">
+          <p class="script">Hey, um, my mother was discharged today and they prescribed <span class="f">lisinopril</span> <span class="f">five milligrams</span>, <span class="es">pero no lo tengo aquí</span>. Call me at <span class="f g">three four six, five eight eight, five two five nine</span>.</p>
+          <div class="playrow">
+            <button class="play" id="playBtn" type="button" aria-label="Play the test call">
+              <span class="disc" id="disc">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5v17l15-8.5z"/></svg>
+              </span>
+              <span class="lbl"><b id="playLbl">Play the test call</b><span id="playSub">11 seconds · what the vendors hear</span></span>
+            </button>
+            <div class="wave" id="wave"></div>
+          </div>
+          <div class="audiobar"><i id="abar"></i></div>
+          <audio id="probeAudio" src="clips/p14e0d7a4.wav" preload="auto"></audio>
+        </div>
+        <p class="cap an" style="--d:.6s">Spanish-accented voice · noisy room · bad phone line · highlights = the details that must survive</p>
+      </div>
+    </section>
+
+    <!-- ================= S7 · the answer key ================= -->
+    <section class="slide" data-k="s7">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">Step 3 · the answer key</div>
+        <h1 class="an" style="--d:.13s">Start with the answer. Then make the <em>question</em>.</h1>
+        <p class="sub an" style="--d:.3s">For real audio, the true transcript is hard to know. So we flip the order:</p>
+        <div class="flow">
+          <div class="step an" style="--d:.4s">
+            <div class="n">01 · We write the answer</div>
+            <div class="v mono">"call me at 346-588-5259"</div>
+            <div class="foot">an invented sentence, never spoken before</div>
+          </div>
+          <div class="arrow an" style="--d:.52s"><svg viewBox="0 0 48 24" aria-hidden="true"><path d="M2 12h42m-9-8 9 8-9 8"/></svg></div>
+          <div class="step an" style="--d:.58s">
+            <div class="n">02 · A voice makes it a question</div>
+            <div class="v">spoken on a bad line</div>
+            <div class="foot">accent · noise · compressed cell audio</div>
+          </div>
+          <div class="arrow an" style="--d:.7s"><svg viewBox="0 0 48 24" aria-hidden="true"><path d="M2 12h42m-9-8 9 8-9 8"/></svg></div>
+          <div class="step key an" style="--d:.76s">
+            <div class="n">03 · The answer key</div>
+            <div class="v mono">346-588-5259</div>
+            <div class="foot">known before the audio existed</div>
+          </div>
+        </div>
+        <p class="cap an" style="--d:.92s">no graders · no guesswork · no arguing over the right answer</p>
+      </div>
+    </section>
+
+    <!-- ================= S8 · the race (2 beats) ================= -->
+    <section class="slide dense" data-k="s8" data-steps="2" data-beat="1">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">The head-to-head</div>
+        <h1 class="an" style="--d:.12s">Same call. Four real <em>transcription services</em>.</h1>
+        <div class="ans an" style="--d:.28s">
+          <span class="albl">The answer</span>
+          <span class="a">lisinopril · 5 mg</span>
+          <span class="a g">346-588-5259</span>
+          <button class="ab mini" type="button" data-audio="clips/p14e0d7a4.wav" data-lbl="Hear it again">
+            <span class="abd">▶</span><span class="abt"><b>Hear it again</b></span>
+          </button>
+          <span class="albl" data-b="2">showing 4 of the 6 services tested</span>
+        </div>
+        <div class="tr">
+          <div class="row an" style="--d:.42s">
+            <div class="vend">OpenAI gpt-4o-transcribe</div>
+            <div class="txt">…prescribed <span class="e">Enalapril</span> 5 milligrams. <span class="e">Hold your tree clippers. Faraday cage.</span></div>
+            <div class="verdict">different real drug · invented words</div>
+          </div>
+          <div class="row an" style="--d:.54s">
+            <div class="vend">Deepgram Nova-3</div>
+            <div class="txt">…they <span class="e">retrieved lipinephrine</span> 5 milligrams… <span class="e">3 4 6, 5 8 8</span></div>
+            <div class="verdict">made-up drug · number cut off</div>
+          </div>
+          <div class="row an" style="--d:.66s">
+            <div class="vend">Gladia Solaria</div>
+            <div class="txt">…prescribed <span class="e">lipinopril</span> 5 mg. Call me at <span class="e">346.</span></div>
+            <div class="verdict">3 of 10 digits</div>
+          </div>
+          <div data-b="2">
+            <div class="row win">
+              <div class="vend">AssemblyAI Universal-3.5</div>
+              <div class="txt">…<span class="e">they'll</span> five milligrams… called me a <span class="k">346 588-5259</span></div>
+              <div class="verdict">dropped the drug · number exactly right</div>
+            </div>
+          </div>
+        </div>
+        <div data-b="2">
+          <p class="punch">Four ways to get it wrong. <em>One got the number right.</em></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= S9 · the catch (2 beats) ================= -->
+    <section class="slide dense" data-k="s9" data-steps="2" data-beat="1">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">The catch</div>
+        <h1 class="an" style="--d:.12s">Test a vendor, and the vendor can <em>game you</em>.</h1>
+        <div data-dim-at="2">
+          <ul class="blist" style="margin-top:clamp(24px,3.6vh,44px)">
+            <li class="an" style="--d:.4s">A vendor can often tell when a call is a test</li>
+            <li class="an" style="--d:.55s">Its <b>best system</b> for the test. A <b>cheaper one</b> for your real callers</li>
+            <li class="an" style="--d:.7s">Cars did exactly this with emissions tests</li>
+          </ul>
+        </div>
+        <div data-b="2">
+          <div class="sting" style="margin-top:clamp(20px,3vh,36px)">
+            <div class="gauge">
+              <svg viewBox="0 0 250 132" aria-hidden="true">
+                <path class="track" d="M25 110a100 100 0 0 1 200 0"/>
+                <path class="val" id="gval" d="M25 110a100 100 0 0 1 200 0"/>
+                <line class="needle" id="gneedle" x1="125" y1="110" x2="125" y2="30"/>
+                <circle cx="125" cy="110" r="6" fill="#f3f6f9"/>
+              </svg>
+              <div class="read" id="gread">100%</div>
+              <div class="glbl">how easily the decoy spots a lab-style test</div>
+            </div>
+            <div>
+              <p class="say">To prove it, we planted a decoy vendor: <b>ShadyTranscribe</b>. Not one of the four.</p>
+              <p class="say gapline">Our first exam sounded like a lab recording. The decoy spotted all <b>38</b> test calls.</p>
+              <button class="ab" type="button" data-audio="clips/demo_naive.wav" data-lbl="Hear the lab test">
+                <span class="abd">▶</span><span class="abt"><b>Hear the lab test</b><i>clean studio audio, obviously a test</i></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= S10 · the fix (2 beats) ================= -->
+    <section class="slide dense" data-k="s10" data-steps="2" data-beat="1">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">The fix</div>
+        <h1 class="an" style="--d:.12s">So our test calls sound like <em>real calls</em>.</h1>
+        <p class="sub an" style="--d:.28s">Same questions. Same answers. Cloaked in real-call sound.</p>
+        <div class="sting">
+          <div class="gauge an" style="--d:.4s">
+            <svg viewBox="0 0 250 132" aria-hidden="true">
+              <path class="track" d="M25 110a100 100 0 0 1 200 0"/>
+              <path class="val" id="g2val" d="M25 110a100 100 0 0 1 200 0"/>
+              <line class="needle" id="g2needle" x1="125" y1="110" x2="125" y2="30"/>
+              <circle cx="125" cy="110" r="6" fill="#f3f6f9"/>
+            </svg>
+            <div class="read" id="g2read">100%</div>
+            <div class="glbl">how easily the decoy spots the cloaked test</div>
+            <div class="glbl" style="color:var(--green);letter-spacing:.16em">a coin flip: it cannot tell</div>
+          </div>
+          <div>
+            <ul class="blist sm an" style="--d:.46s;margin-top:0">
+              <li>A test call gives itself away: too clean, too tidy, no phone line</li>
+              <li>So we add waiting-room noise, phone-line sound, and messy, natural timing</li>
+              <li>All matched to this buyer's real calls, so nothing about a test stands out</li>
+            </ul>
+            <button class="ab an" type="button" style="--d:.6s" data-audio="clips/demo_naive.wav" data-lbl="Hear the lab test">
+              <span class="abd">▶</span><span class="abt"><b>Hear the lab test</b><i>the old sound: clean studio audio</i></span>
+            </button>
+            <button class="ab an" type="button" style="--d:.72s" data-audio="clips/demo_stealth.wav" data-lbl="Hear the cloaked test">
+              <span class="abd">▶</span><span class="abt"><b>Hear the cloaked test</b><i>same words, cloaked: sounds like a real call</i></span>
+            </button>
+            <div data-b="2">
+              <div class="err-jump">
+                <div class="pill a"><b>7%</b><span>wrong when it knew it was a test</span></div>
+                <div class="to">→</div>
+                <div class="pill b"><b>35%</b><span>when it thought the call was real</span></div>
+              </div>
+              <p class="say" style="margin-top:clamp(14px,2.2vh,24px)"><b style="color:var(--red)">Caught.</b> One system for tests, a cheaper one for real callers. The same trick as the emissions scandal.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= S11 · the verdict ================= -->
+    <section class="slide" data-k="close">
+      <div class="inner">
+        <div class="kicker an" style="--d:.05s">The verdict</div>
+        <div class="verdictcard an" style="--d:.16s">
+          <span class="tag" style="color:var(--green);border-color:rgba(63,227,143,.4)">Buy this one</span>
+          <h1 class="who">AssemblyAI Universal-3.5</h1>
+          <div class="nums">5.2% of details wrong across the whole exam · 96% sure it's the best pick</div>
+          <div class="flip">ElevenLabs, the public <b>#1</b>, finished <b>last</b> on these calls</div>
+          <div class="flip" style="margin-top:6px">all six services ranked with the cloaked exam · the decoy was never a contestant</div>
+          <div class="cost">The whole exam: <b>8 cents</b>.</div>
+        </div>
+        <div class="signoff an" style="--d:.6s"><b>Vet</b> · a pre-flight check for agents that spend money.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="dots" id="dots" aria-label="slide navigation"></nav>
+  <div class="hint" id="hint">press <kbd>space</kbd></div>
+  <div class="vig"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- never throw ---------- */
+  function safe(fn){
+    return function(){
+      try{ return fn.apply(this,arguments); }
+      catch(e){ /* swallow: a live demo must never die */ return undefined; }
+    };
+  }
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ---------- decorative wave bars (slide 6) ---------- */
+  var buildWave = safe(function(){
+    var host = $("wave"); if(!host){ return; }
+    for(var i=0;i<34;i++){
+      var b = document.createElement("i");
+      b.style.animationDelay = (-(i*0.077).toFixed(3)) + "s";
+      b.style.animationDuration = (0.72 + ((i*37)%9)/12).toFixed(2) + "s";
+      host.appendChild(b);
+    }
+  });
+  buildWave();
+
+  /* ================= deck engine ================= */
+  var slides = [].slice.call(document.querySelectorAll("#deck .slide"));
+  var steps  = slides.map(function(s){
+    var n = parseInt(s.getAttribute("data-steps") || "1", 10);
+    return (isFinite(n) && n > 0) ? n : 1;
+  });
+  var idx = 0, beat = 1;
+
+  var dotsHost = $("dots");
+  var dots = [];
+  var buildDots = safe(function(){
+    if(!dotsHost){ return; }
+    slides.forEach(function(s, i){
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("aria-label", "Go to slide " + (i+1));
+      b.appendChild(document.createElement("i"));
+      b.addEventListener("click", safe(function(ev){
+        ev.stopPropagation(); ev.preventDefault(); go(i, 1);
+      }));
+      dotsHost.appendChild(b);
+      dots.push(b);
+    });
+  });
+  buildDots();
+
+  var ctot = $("ctot"); if(ctot){ ctot.textContent = String(slides.length).length < 2 ? "0"+slides.length : String(slides.length); }
+
+  /* gauge geometry: semicircle r=100 -> length = PI*100 */
+  var GLEN = Math.PI * 100;
+  var setGaugeEl = safe(function(vId, nId, rId, pct){
+    var v = $(vId), n = $(nId), r = $(rId);
+    var hot = pct >= 75;
+    if(v){
+      v.style.setProperty("--len", GLEN.toFixed(1));
+      v.style.strokeDasharray = GLEN.toFixed(1);
+      v.style.strokeDashoffset = (GLEN * (1 - pct/100)).toFixed(1);
+      v.style.stroke = hot ? "var(--red)" : "var(--green)";
+      v.style.filter = hot ? "drop-shadow(0 0 12px rgba(255,85,102,.45))"
+                           : "drop-shadow(0 0 12px rgba(63,227,143,.4))";
+    }
+    if(n){ n.style.transform = "rotate(" + (-90 + (pct/100)*180).toFixed(1) + "deg)"; }
+    if(r){ r.textContent = Math.round(pct) + "%"; r.style.color = hot ? "var(--red)" : "var(--green)"; }
+  });
+  function setGauge(pct){ setGaugeEl("gval", "gneedle", "gread", pct); }
+  function setGauge2(pct){ setGaugeEl("g2val", "g2needle", "g2read", pct); }
+
+  /* one idea per press: multi-beat slides reveal their pieces in order */
+  var applyBeat = safe(function(){
+    var s = slides[idx];
+    if(!s){ return; }
+    if(steps[idx] > 1){ s.setAttribute("data-beat", String(beat)); }
+  });
+
+  /* entering the fix slide replays the drop: the dial starts where the catch
+     slide left it, then falls to a coin flip */
+  var lastK = "", g2timer = null;
+  var onSlideEnter = safe(function(){
+    var k = slides[idx] ? slides[idx].getAttribute("data-k") : "";
+    if(k === lastK){ return; }
+    lastK = k;
+    if(k === "s10"){
+      setGauge2(100);
+      if(g2timer){ clearTimeout(g2timer); }
+      g2timer = setTimeout(safe(function(){ setGauge2(50); }), 700);
+    }
+  });
+
+  var render = safe(function(){
+    for(var i=0;i<slides.length;i++){
+      var on = (i === idx);
+      slides[i].classList.toggle("is-active", on);
+      slides[i].setAttribute("aria-hidden", on ? "false" : "true");
+      if(dots[i]){
+        dots[i].classList.toggle("on", on);
+        dots[i].classList.toggle("done", i < idx);
+      }
+    }
+    var c = $("cnum");
+    if(c){ c.textContent = (idx+1) < 10 ? "0"+(idx+1) : String(idx+1); }
+    var hint = $("hint");
+    if(hint){ hint.classList.toggle("show", idx === 0 && !moved); }
+    applyBeat();
+    onSlideEnter();
+    if(slides[idx] && slides[idx].getAttribute("data-k") !== "s6"){ stopHero(); }
+    stopAB();
+    syncUrl();
+  });
+
+  var syncUrl = safe(function(){
+    if(!window.history || !history.replaceState){ return; }
+    try{
+      var q = "?slide=" + (idx+1) + (steps[idx] > 1 ? "&beat=" + beat : "");
+      history.replaceState(null, "", q);
+    }catch(e){ /* file:// can refuse; harmless */ }
+  });
+
+  var moved = false;
+  function go(i, b){
+    if(i < 0){ i = 0; }
+    if(i > slides.length-1){ i = slides.length-1; }
+    idx = i;
+    beat = Math.min(Math.max(b||1, 1), steps[idx]);
+    if(idx > 0){ moved = true; }
+    render();
+  }
+
+  var next = safe(function(){
+    moved = true;
+    if(beat < steps[idx]){ beat++; applyBeat(); syncUrl(); markHint(); return; }
+    if(idx < slides.length-1){ go(idx+1, 1); }
+    else { render(); }
+  });
+
+  var prev = safe(function(){
+    if(beat > 1){ beat--; applyBeat(); syncUrl(); return; }
+    if(idx > 0){ go(idx-1, steps[idx-1]); }
+  });
+
+  function markHint(){
+    var h = $("hint"); if(h){ h.classList.remove("show"); }
+  }
+
+  /* ---------- WebAudio fallback ----------
+     Some managed Chrome / projector setups never feed <audio> elements: the
+     element reports "playing" while currentTime stays 0 forever. If that
+     happens we decode the same clip with WebAudio and play it that way —
+     the button must never sit there silently claiming to play. */
+  var WA = { ctx:null, src:null, timer:null };
+  var waStop = safe(function(){
+    if(WA.src){ try{ WA.src.onended = null; WA.src.stop(); }catch(e){} WA.src = null; }
+    if(WA.timer){ clearInterval(WA.timer); WA.timer = null; }
+  });
+  var waStart = safe(function(url, onprogress, onend){
+    if(!WA.ctx){ try{ WA.ctx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+    if(!WA.ctx){ if(onend){ onend(); } return; }
+    try{ if(WA.ctx.state === "suspended"){ WA.ctx.resume(); } }catch(e){}
+    fetch(url).then(function(r){ return r.arrayBuffer(); }).then(function(ab){
+      return new Promise(function(res, rej){ WA.ctx.decodeAudioData(ab, res, rej); });
+    }).then(function(buf){
+      waStop();
+      var s = WA.ctx.createBufferSource();
+      s.buffer = buf; s.connect(WA.ctx.destination);
+      var t0 = WA.ctx.currentTime;
+      s.start();
+      WA.src = s;
+      if(onprogress){
+        WA.timer = setInterval(function(){
+          try{ onprogress(Math.min(1, (WA.ctx.currentTime - t0) / buf.duration)); }catch(e){}
+        }, 100);
+      }
+      s.onended = function(){ if(WA.src === s){ waStop(); if(onend){ onend(); } } };
+    }).catch(function(){ if(onend){ onend(); } });
+  });
+  function stalled(el){ return el && !el.paused && el.currentTime === 0; }
+
+  /* ---------- hero probe audio (slide 6) ---------- */
+  var audio = $("probeAudio");
+  var playing = false;
+  var heroWatch = null;
+
+  var stopHero = safe(function(){
+    if(heroWatch){ clearTimeout(heroWatch); heroWatch = null; }
+    waStop();
+    if(!audio){ return; }
+    try{ if(!audio.paused){ audio.pause(); } if(audio.currentTime){ audio.currentTime = 0; } }catch(e){}
+    setPlaying(false);
+    var ab = $("abar"); if(ab){ ab.style.width = "0%"; }
+  });
+
+  var setPlaying = safe(function(on){
+    playing = !!on;
+    var probe = document.querySelector('[data-k="s6"] .probe');
+    if(probe){ probe.classList.toggle("playing", playing); }
+    var lbl = $("playLbl");
+    if(lbl){ lbl.textContent = playing ? "Playing…" : "Play the test call"; }
+    var disc = $("disc");
+    if(disc){
+      var p = disc.querySelector("path");
+      if(p){ p.setAttribute("d", playing ? "M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" : "M6 3.5v17l15-8.5z"); }
+    }
+  });
+
+  var toggleHero = safe(function(ev){
+    if(ev){ try{ ev.stopPropagation(); ev.preventDefault(); }catch(e){} }
+    if(!audio){ return; }
+    stopAB();
+    if(playing){ stopHero(); return; }
+    var p;
+    try{ p = audio.play(); }
+    catch(e){ p = null; audioBlocked(); }
+    setPlaying(true);
+    if(p && typeof p.then === "function"){
+      p.then(function(){ setPlaying(true); }, function(){ setPlaying(false); audioBlocked(); });
+    }
+    heroWatch = setTimeout(safe(function(){
+      if(!playing || !stalled(audio)){ return; }
+      try{ audio.pause(); }catch(e){}
+      var bar = $("abar");
+      waStart(audio.getAttribute("src"),
+              function(f){ if(bar){ bar.style.width = (f*100).toFixed(1) + "%"; } },
+              function(){ setPlaying(false); if(bar){ bar.style.width = "100%"; } });
+    }), 1200);
+  });
+
+  var audioBlocked = safe(function(){
+    var s = $("playSub");
+    if(s){ s.textContent = "click the button again to allow audio"; }
+  });
+
+  var wireHero = safe(function(){
+    if(!audio){ return; }
+    var btn = $("playBtn");
+    if(btn){
+      btn.addEventListener("click", toggleHero);
+      btn.addEventListener("keydown", safe(function(e){
+        if(e.key === " " || e.key === "Enter" || e.key === "Spacebar"){ e.stopPropagation(); }
+      }));
+    }
+    audio.addEventListener("ended", safe(function(){ setPlaying(false); var ab=$("abar"); if(ab){ ab.style.width="100%"; } }));
+    audio.addEventListener("pause", safe(function(){ if(audio.currentTime >= (audio.duration||1e9)){ setPlaying(false); } }));
+    audio.addEventListener("error", safe(function(){
+      var s = $("playSub"); if(s){ s.textContent = "audio unavailable: clips/p14e0d7a4.wav"; }
+      setPlaying(false);
+    }));
+    audio.addEventListener("timeupdate", safe(function(){
+      var ab = $("abar"); if(!ab){ return; }
+      var d = audio.duration;
+      if(d && isFinite(d) && d > 0){ ab.style.width = Math.min(100, (audio.currentTime/d)*100).toFixed(1) + "%"; }
+    }));
+    audio.addEventListener("loadedmetadata", safe(function(){
+      var d = audio.duration, s = $("playSub");
+      if(s && d && isFinite(d)){ s.textContent = Math.round(d) + " seconds · what the vendors hear"; }
+    }));
+  });
+  wireHero();
+
+  /* ---------- A/B listen buttons (slides 8–9) ----------
+     One shared <audio>, so starting a clip always stops the previous one —
+     overlapping clips would destroy the very comparison the slide is making. */
+  var abAudio = null, abCur = null, abWatch = null;
+  var stopAB = safe(function(){
+    if(abWatch){ clearTimeout(abWatch); abWatch = null; }
+    waStop();
+    if(abAudio){ try{ abAudio.pause(); }catch(e){} }
+    if(abCur){
+      abCur.classList.remove("on");
+      var d = abCur.querySelector(".abd"); if(d){ d.textContent = "▶"; }
+      var b = abCur.querySelector(".abt b"); if(b){ b.textContent = abCur.getAttribute("data-lbl"); }
+    }
+    abCur = null;
+  });
+  var wireAB = safe(function(){
+    abAudio = new Audio();
+    abAudio.addEventListener("ended", stopAB);
+    abAudio.addEventListener("error", safe(function(){
+      if(abCur){ var i = abCur.querySelector(".abt i"); if(i){ i.textContent = "audio unavailable"; } }
+      stopAB();
+    }));
+    Array.prototype.forEach.call(document.querySelectorAll("[data-audio]"), function(btn){
+      btn.addEventListener("click", safe(function(ev){
+        ev.stopPropagation();                    // a click here must not advance the slide
+        stopHero();
+        var was = (abCur === btn);
+        stopAB();
+        if(was){ return; }                       // second click = stop
+        abCur = btn;
+        btn.classList.add("on");
+        var d = btn.querySelector(".abd"); if(d){ d.textContent = "■"; }
+        var b = btn.querySelector(".abt b"); if(b){ b.textContent = "Playing…"; }
+        abAudio.src = btn.getAttribute("data-audio");
+        var p = abAudio.play();
+        if(p && p.catch){ p.catch(function(){ stopAB(); }); }
+        abWatch = setTimeout(safe(function(){
+          if(abCur !== btn || !stalled(abAudio)){ return; }
+          try{ abAudio.pause(); }catch(e){}
+          waStart(btn.getAttribute("data-audio"), null, function(){ if(abCur === btn){ stopAB(); } });
+        }), 1200);
+      }));
+    });
+  });
+  wireAB();
+
+  /* ---------- input ---------- */
+  var onKey = safe(function(e){
+    var k = e.key;
+    if(k === " " || k === "Spacebar" || k === "ArrowRight" || k === "PageDown" || k === "Enter"){
+      e.preventDefault(); next();
+    } else if(k === "ArrowLeft" || k === "PageUp" || k === "Backspace"){
+      e.preventDefault(); prev();
+    } else if(k === "Home"){ e.preventDefault(); go(0,1); }
+    else if(k === "End"){ e.preventDefault(); go(slides.length-1,1); }
+    else if(k === "Escape"){ stopAB(); stopHero(); }
+    else if(k === "p" || k === "P"){
+      if(slides[idx] && slides[idx].getAttribute("data-k") === "s6"){ e.preventDefault(); toggleHero(); }
+    }
+    else if(k >= "1" && k <= "9"){ e.preventDefault(); go(parseInt(k,10)-1, 1); }
+    else if(k === "0"){ e.preventDefault(); go(slides.length-1, 1); }
+  });
+  document.addEventListener("keydown", onKey);
+  document.addEventListener("keypress", safe(function(e){
+    if(e.key === " " || e.keyCode === 32){ e.preventDefault(); }
+  }));
+
+  var onClick = safe(function(e){
+    var t = e.target;
+    while(t && t !== document.body){
+      if(t.tagName === "BUTTON" || t.tagName === "A" || t.tagName === "AUDIO"){ return; }
+      t = t.parentNode;
+    }
+    next();
+  });
+  var stage = $("stage");
+  if(stage){ stage.addEventListener("click", onClick); }
+
+  /* touch: swipe */
+  var tx = 0, ty = 0;
+  document.addEventListener("touchstart", safe(function(e){
+    if(e.touches && e.touches[0]){ tx = e.touches[0].clientX; ty = e.touches[0].clientY; }
+  }), {passive:true});
+  document.addEventListener("touchend", safe(function(e){
+    if(!e.changedTouches || !e.changedTouches[0]){ return; }
+    var dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+    if(Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)){ if(dx < 0){ next(); } else { prev(); } }
+  }), {passive:true});
+
+  /* ---------- boot ---------- */
+  var boot = safe(function(){
+    var start = 0, sbeat = 1;
+    try{
+      var qs = (window.location.search || "").replace(/^\?/, "").split("&");
+      for(var i=0;i<qs.length;i++){
+        var kv = qs[i].split("=");
+        if(kv[0] === "slide"){ var n = parseInt(kv[1],10); if(isFinite(n)){ start = Math.min(Math.max(n-1,0), slides.length-1); } }
+        if(kv[0] === "beat"){ var m = parseInt(kv[1],10); if(isFinite(m)){ sbeat = m; } }
+      }
+      var h = (window.location.hash || "").replace("#","");
+      if(!start && /^\d+$/.test(h)){ start = Math.min(Math.max(parseInt(h,10)-1,0), slides.length-1); }
+    }catch(e){}
+    if(start > 0){ moved = true; }
+    setGauge(100);
+    setGauge2(100);
+    go(start, sbeat);
+    var hint = $("hint");
+    if(hint && start === 0){
+      if(window.setTimeout){ setTimeout(safe(function(){ hint.classList.add("show"); }), 1400); }
+      else { hint.classList.add("show"); }
+    }
+  });
+  boot();
+
+  /* expose a tiny handle for automated verification */
+  window.VETDECK = {
+    get index(){ return idx; },
+    get beat(){ return beat; },
+    get count(){ return slides.length; },
+    next: next, prev: prev, go: go,
+    headline: function(){
+      var s = slides[idx];
+      var h = s ? s.querySelector("h1") : null;
+      return h ? h.textContent : "";
+    }
+  };
+
+  window.addEventListener("error", function(e){ try{ e.preventDefault(); }catch(x){} });
+})();
+</script>
+</body>
+</html>
